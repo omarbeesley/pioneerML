@@ -40,7 +40,7 @@ class FullGraphTransformerBlock(nn.Module):
 
 
 class GroupClassifier(nn.Module):
-    def __init__(self, in_dim=5, edge_dim=4, hidden=200, heads=4,
+    def __init__(self, in_dim=4, edge_dim=4, hidden=200, heads=4,
                  num_blocks=2, dropout=0.1, num_classes=3):
         super().__init__()
 
@@ -63,7 +63,7 @@ class GroupClassifier(nn.Module):
         ))
 
         self.head = nn.Sequential(
-            nn.Linear(concat_dim, concat_dim // 2),
+            nn.Linear(concat_dim + 1, concat_dim // 2),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(concat_dim // 2, num_classes)
@@ -77,12 +77,13 @@ class GroupClassifier(nn.Module):
             xs.append(x)
         x_cat = self.jk(xs)
         pooled = self.pool(x_cat, data.batch)
-        return self.head(pooled)
+        out = torch.cat([pooled, data.u], dim=1)
+        return self.head(out)
 
 
 
 class GroupAffinityModel(nn.Module):
-    def __init__(self, in_channels=5, hidden_channels=128,
+    def __init__(self, in_channels=4, hidden_channels=128,
                  heads=4, num_layers=3, dropout=0.1):
         super().__init__()
 
@@ -105,7 +106,7 @@ class GroupAffinityModel(nn.Module):
         ))
 
         self.head = nn.Sequential(
-            nn.Linear(jk_dim, hidden_channels),
+            nn.Linear(jk_dim + 1, hidden_channels),
             nn.ReLU(),
             nn.Linear(hidden_channels, 1)
         )
@@ -118,12 +119,13 @@ class GroupAffinityModel(nn.Module):
             xs.append(x)
         x_cat = self.jk(xs)
         pooled = self.pool(x_cat, data.batch)
-        return self.head(pooled)
+        out = torch.cat([pooled, data.u], dim=1)
+        return self.head(out)
 
 
 
 class EndpointRegressor(nn.Module):
-    def __init__(self, in_channels=5, hidden=160, heads=4,
+    def __init__(self, in_channels=4, hidden=160, heads=4,
                  layers=2, dropout=0.1):
         super().__init__()
 
@@ -146,7 +148,7 @@ class EndpointRegressor(nn.Module):
         ))
 
         self.head = nn.Sequential(
-            nn.Linear(jk_dim, jk_dim),
+            nn.Linear(jk_dim + 1, jk_dim),
             nn.ReLU(),
             nn.Linear(jk_dim, 6)
         )
@@ -160,12 +162,15 @@ class EndpointRegressor(nn.Module):
 
         x_cat = self.jk(xs)
         pooled = self.pool(x_cat, data.batch)
-        return self.head(pooled).view(-1, 2, 3)
+        x_cat = self.jk(xs)
+        pooled = self.pool(x_cat, data.batch)
+        out = torch.cat([pooled, data.u], dim=1)
+        return self.head(out).view(-1, 2, 3)
 
 
 
 class GroupSplitter(nn.Module):
-    def __init__(self, in_channels=5, hidden=128, heads=4,
+    def __init__(self, in_channels=4, hidden=128, heads=4,
                  layers=3, dropout=0.1, num_classes=3):
         super().__init__()
 
@@ -178,18 +183,38 @@ class GroupSplitter(nn.Module):
             for _ in range(layers)
         ])
 
-        self.head = nn.Linear(hidden, num_classes)
+        self.node_head = nn.Linear(hidden + 1, num_classes)
+
+        self.pool = AttentionalAggregation(nn.Sequential(
+            nn.Linear(hidden, hidden // 2),
+            nn.ReLU(),
+            nn.Linear(hidden // 2, 1)
+        ))
+
+        self.energy_head = nn.Linear(hidden + 1, num_classes)
 
     def forward(self, data):
         x = self.input_proj(data.x)
         for block in self.blocks:
             x = block(x, data.edge_index, data.edge_attr)
-        return self.head(x)
+        
+        # Broadcast global energy to each node and concatenate
+        # Node prediction (PDG)
+        u_expanded = data.u[data.batch]
+        node_out = torch.cat([x, u_expanded], dim=1)
+        node_logits = self.node_head(node_out)
+
+        # Graph prediction (Total Energy per Class)
+        pooled = self.pool(x, data.batch)
+        graph_out = torch.cat([pooled, data.u], dim=1)
+        energy_preds = self.energy_head(graph_out)
+
+        return node_logits, energy_preds
 
 
 
 class PionStopRegressor(nn.Module):
-    def __init__(self, in_channels=5, hidden=128, heads=4,
+    def __init__(self, in_channels=4, hidden=128, heads=4,
                  layers=3, dropout=0.1):
         super().__init__()
 
@@ -212,7 +237,7 @@ class PionStopRegressor(nn.Module):
         ))
 
         self.head = nn.Sequential(
-            nn.Linear(jk_dim, hidden),
+            nn.Linear(jk_dim + 1, hidden),
             nn.ReLU(),
             nn.Linear(hidden, 3)
         )
@@ -225,11 +250,12 @@ class PionStopRegressor(nn.Module):
             xs.append(x)
         x_cat = self.jk(xs)
         pooled = self.pool(x_cat, data.batch)
-        return self.head(pooled)
+        out = torch.cat([pooled, data.u], dim=1)
+        return self.head(out)
 
 
 class PositronAngleModel(nn.Module):
-    def __init__(self, in_channels=5, hidden=128, heads=4,
+    def __init__(self, in_channels=4, hidden=128, heads=4,
                  layers=2, dropout=0.1):
         super().__init__()
 
@@ -253,9 +279,9 @@ class PositronAngleModel(nn.Module):
         ))
 
         self.head = nn.Sequential(
-            nn.Linear(jk_dim, hidden),
+            nn.Linear(jk_dim + 3, hidden), #Adds pion stop position
             nn.ReLU(),
-            nn.Linear(hidden, 2)   # predicts 2 angle components
+            nn.Linear(hidden, 3)   # predicts unit vector corresponding to theta/phi
         )
 
     def forward(self, data):
@@ -268,5 +294,6 @@ class PositronAngleModel(nn.Module):
 
         x_cat = self.jk(xs)
         pooled = self.pool(x_cat, data.batch)
-        return self.head(pooled)
+        out = torch.cat([pooled, data.pred_pion_stop], dim=1)
+        return self.head(out)
 

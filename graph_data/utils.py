@@ -19,7 +19,28 @@ import torch
 from torch.utils.data import Dataset
 from torch_geometric.data import Data
 
+from torch_geometric.data import Data
+from torch_geometric.loader import DataLoader
 
+
+
+
+PION_MASK = 0b00001
+MUON_MASK = 0b00010
+POSITRON_MASK = 0b00100
+ELECTRON_MASK = 0b01000
+OTHER_MASK = 0b10000
+
+BIT_TO_CLASS = {
+    PION_MASK: 0,
+    MUON_MASK: 1,
+    POSITRON_MASK: 2,  # positron collapses to mip label
+    ELECTRON_MASK: 2,  # electron collapses to mip label
+    # OTHER_MASK hits are ignored for supervision
+}
+
+CLASS_NAMES = {0: 'pion', 1: 'muon', 2: 'mip'}
+NUM_GROUP_CLASSES = len(set(BIT_TO_CLASS.values()))
 def fully_connected_edge_index(num_nodes: int, device: Optional[torch.device] = None) -> torch.Tensor:
     """Return a directed fully-connected edge index without self loops."""
     if num_nodes <= 1:
@@ -63,6 +84,13 @@ class GraphRecord:
     group_id: Optional[int] = None
     hit_labels: Optional[Sequence[Sequence[int]]] = None
     group_probs: Optional[Sequence[float]] = None
+    hit_pdgs: Optional[Sequence[int]] = None
+    class_energies: Optional[Sequence[float]] = None
+    true_start: Optional[Sequence[float]] = None
+    true_end: Optional[Sequence[float]] = None
+    true_pion_stop: Optional[Sequence[float]] = None
+    true_angle_vector: Optional[Sequence[float]] = None
+    pred_pion_stop: Optional[Sequence[float]] = None
 
 
 class GraphGroupDataset(Dataset):
@@ -93,27 +121,58 @@ class GraphGroupDataset(Dataset):
             raise ValueError("All per-hit arrays must share the same shape.")
 
         num_hits = coord.shape[0]
-        group_energy = np.full(num_hits, energy.sum(), dtype=np.float32)
         node_features = torch.tensor(
-            np.stack([coord, z_pos, energy, view, group_energy], axis=1), dtype=torch.float
+            np.stack([coord, z_pos, energy, view], axis=1), dtype=torch.float
         )
 
         edge_index = fully_connected_edge_index(num_hits, device=node_features.device)
         edge_attr = build_edge_attr(node_features, edge_index)
 
         data = Data(x=node_features, edge_index=edge_index, edge_attr=edge_attr)
+        
+        # Add global group energy feature (shape [1, 1] for proper batching)
+        data.u = torch.tensor([[energy.sum()]], dtype=torch.float)
 
-        if item.labels and self.num_classes:
+        if item.labels is not None and self.num_classes:
             label_tensor = torch.zeros(self.num_classes, dtype=torch.float)
             for lbl in item.labels:
                 if 0 <= lbl < self.num_classes:
                     label_tensor[lbl] = 1.0
             data.y = label_tensor
+            
+        if item.hit_pdgs is not None:
+            data.y_node = torch.tensor(item.hit_pdgs, dtype=torch.long)
+            
+        if item.class_energies is not None:
+            data.y_energy = torch.tensor(item.class_energies, dtype=torch.float).unsqueeze(0) # [1, num_classes]
+
+        if item.hit_labels is not None:
+            # Multi-label targets for splitter [N, 3]
+            data.y = torch.tensor(item.hit_labels, dtype=torch.float)
 
         if item.event_id is not None:
             data.event_id = torch.tensor(int(item.event_id), dtype=torch.long)
         if item.group_id is not None:
             data.group_id = torch.tensor(int(item.group_id), dtype=torch.long)
+            
+        if item.true_start is not None and item.true_end is not None:
+            # shape: [2, 3]
+            start = torch.tensor(item.true_start, dtype=torch.float)
+            end = torch.tensor(item.true_end, dtype=torch.float)
+            data.y_pos = torch.stack([start, end], dim=0).unsqueeze(0)
+            data.group_id = torch.tensor(int(item.group_id), dtype=torch.long)
+
+        if item.true_pion_stop is not None:
+            # shape: [1, 3]
+            data.y_pion_stop = torch.tensor(item.true_pion_stop, dtype=torch.float).unsqueeze(0)
+
+        if item.true_angle_vector is not None:
+            # shape: [1, 3]
+            data.y_angle_vector = torch.tensor(item.true_angle_vector, dtype=torch.float).unsqueeze(0)
+
+        if item.pred_pion_stop is not None:
+            # shape: [1, 3]
+            data.pred_pion_stop = torch.tensor(item.pred_pion_stop, dtype=torch.float).unsqueeze(0)
 
         return data
 
@@ -129,240 +188,19 @@ class GraphGroupDataset(Dataset):
             labels=raw.get("labels"),
             event_id=raw.get("event_id"),
             group_id=raw.get("group_id"),
-        )
-
-
-@dataclass
-class PionStopRecord:
-    coord: Iterable[float]
-    z: Iterable[float]
-    energy: Iterable[float]
-    view: Iterable[float]
-    time: Iterable[float]
-    pdg: Iterable[int]
-    true_x: Iterable[float]
-    true_y: Iterable[float]
-    true_z: Iterable[float]
-    true_time: Iterable[float]
-    event_id: Optional[int] = None
-    group_id: Optional[int] = None
-
-
-class PionStopGraphDataset(Dataset):
-    """
-    Dataset for regressing pion stop positions from time-group graphs.
-
-    Each record must provide per-hit true coordinates (true_x/true_y/true_z),
-    particle identifiers (pdg), and truth timing information. The target is
-    derived from the final pion hit within the group.
-    """
-
-    def __init__(
-        self,
-        records: Sequence[PionStopRecord | Dict[str, Any]],
-        *,
-        pion_pdg: int = 1,
-        min_pion_hits: int = 1,
-        use_true_time: bool = True,
-    ):
-        self.items: List[PionStopRecord] = [self._coerce(item) for item in records]
-        self.pion_pdg = pion_pdg
-        self.min_pion_hits = max(1, min_pion_hits)
-        self.use_true_time = use_true_time
-
-    def __len__(self) -> int:
-        return len(self.items)
-
-    def __getitem__(self, index: int) -> Data:
-        item = self.items[index]
-
-        coord = np.asarray(item.coord, dtype=np.float32)
-        z_pos = np.asarray(item.z, dtype=np.float32)
-        energy = np.asarray(item.energy, dtype=np.float32)
-        view = np.asarray(item.view, dtype=np.float32)
-
-        if not (coord.shape == z_pos.shape == energy.shape == view.shape):
-            raise ValueError("All per-hit arrays must share the same shape.")
-
-        pdg = np.asarray(item.pdg, dtype=np.int32)
-        true_x = np.asarray(item.true_x, dtype=np.float32)
-        true_y = np.asarray(item.true_y, dtype=np.float32)
-        true_z = np.asarray(item.true_z, dtype=np.float32)
-        true_time = np.asarray(item.true_time, dtype=np.float32)
-        hit_time = np.asarray(item.time, dtype=np.float32)
-
-        if not (
-            pdg.shape == true_x.shape == true_y.shape == true_z.shape == true_time.shape == hit_time.shape == coord.shape
-        ):
-            raise ValueError("All PionStopRecord arrays must align per hit.")
-
-        pion_indices = np.flatnonzero(pdg == self.pion_pdg)
-        if pion_indices.size < self.min_pion_hits:
-            print(pdg, self.pion_pdg)
-            raise ValueError("Record does not contain enough pion hits to compute stop target.")
-
-        if self.use_true_time:
-            ref_time = true_time[pion_indices]
-        else:
-            ref_time = hit_time[pion_indices]
-        last_idx = pion_indices[int(np.argmax(ref_time))]
-        stop_target = np.array([true_x[last_idx], true_y[last_idx], true_z[last_idx]], dtype=np.float32)
-
-        num_hits = coord.shape[0]
-        group_energy = np.full(num_hits, energy.sum(), dtype=np.float32)
-        node_features = torch.tensor(
-            np.stack([coord, z_pos, energy, view, group_energy], axis=1),
-            dtype=torch.float,
-        )
-
-        edge_index = fully_connected_edge_index(num_hits, device=node_features.device)
-        edge_attr = build_edge_attr(node_features, edge_index)
-
-        target_tensor = torch.tensor(stop_target, dtype=torch.float).unsqueeze(0)
-
-        data = Data(
-            x=node_features,
-            edge_index=edge_index,
-            edge_attr=edge_attr,
-            y=target_tensor,
-        )
-
-        if item.event_id is not None:
-            data.event_id = torch.tensor(int(item.event_id), dtype=torch.long)
-        if item.group_id is not None:
-            data.group_id = torch.tensor(int(item.group_id), dtype=torch.long)
-
-        return data
-
-    @staticmethod
-    def _coerce(raw: PionStopRecord | Dict[str, Any]) -> PionStopRecord:
-        if isinstance(raw, PionStopRecord):
-            return raw
-        return PionStopRecord(
-            coord=raw["coord"],
-            z=raw["z"],
-            energy=raw["energy"],
-            view=raw["view"],
-            time=raw["time"],
-            pdg=raw["pdg"],
-            true_x=raw["true_x"],
-            true_y=raw["true_y"],
-            true_z=raw["true_z"],
-            true_time=raw["true_time"],
-            event_id=raw.get("event_id"),
-            group_id=raw.get("group_id"),
-        )
-
-
-@dataclass
-class PositronAngleRecord:
-    coord: Iterable[float]
-    z: Iterable[float]
-    energy: Iterable[float]
-    view: Iterable[float]
-    angle: Sequence[float]
-    event_id: Optional[int] = None
-    group_id: Optional[int] = None
-    pion_stop: Optional[Sequence[float]] = None
-
-
-class PositronAngleGraphDataset(Dataset):
-    """
-    Dataset for regressing positron emission angles.
-
-    Each record must provide per-hit features plus a per-group angle target:
-      * angles can be either [theta, phi] in radians or a unit vector [x, y, z]
-    The dataset converts targets into normalized 3D vectors.
-    """
-
-    def __init__(self, records: Sequence[PositronAngleRecord | Dict[str, Any]]):
-        self.items: List[PositronAngleRecord] = [self._coerce(item) for item in records]
-
-    def __len__(self) -> int:
-        return len(self.items)
-
-    def __getitem__(self, index: int) -> Data:
-        item = self.items[index]
-
-        coord = np.asarray(item.coord, dtype=np.float32)
-        z_pos = np.asarray(item.z, dtype=np.float32)
-        energy = np.asarray(item.energy, dtype=np.float32)
-        view = np.asarray(item.view, dtype=np.float32)
-
-        if not (coord.shape == z_pos.shape == energy.shape == view.shape):
-            raise ValueError("All per-hit arrays must share the same shape.")
-
-        num_hits = coord.shape[0]
-        group_energy = np.full(num_hits, energy.sum(), dtype=np.float32)
-        node_features = torch.tensor(
-            np.stack([coord, z_pos, energy, view, group_energy], axis=1),
-            dtype=torch.float,
-        )
-
-        target_vec = torch.tensor(self._angle_to_vector(item.angle), dtype=torch.float).unsqueeze(0)
-
-        edge_index = fully_connected_edge_index(num_hits, device=node_features.device)
-        edge_attr = build_edge_attr(node_features, edge_index)
-
-        data = Data(
-            x=node_features,
-            edge_index=edge_index,
-            edge_attr=edge_attr,
-            y=target_vec,
-        )
-
-        if item.event_id is not None:
-            data.event_id = torch.tensor(int(item.event_id), dtype=torch.long)
-        if item.group_id is not None:
-            data.group_id = torch.tensor(int(item.group_id), dtype=torch.long)
-        if item.pion_stop is not None:
-            pion_stop = torch.tensor(item.pion_stop, dtype=torch.float)
-            if pion_stop.dim() == 1:
-                pion_stop = pion_stop.unsqueeze(0)
-            data.pion_stop = pion_stop
-
-        return data
-
-    @staticmethod
-    def _angle_to_vector(angle: Sequence[float]) -> np.ndarray:
-        arr = np.asarray(angle, dtype=np.float32).flatten()
-        if arr.size == 2:
-            theta, phi = float(arr[0]), float(arr[1])
-            vec = np.array([
-                math.sin(theta) * math.cos(phi),
-                math.sin(theta) * math.sin(phi),
-                math.cos(theta),
-            ], dtype=np.float32)
-        elif arr.size == 3:
-            vec = arr.astype(np.float32)
-        else:
-            raise ValueError(f"Angle target must have length 2 or 3, got shape {arr.shape}")
-
-        norm = np.linalg.norm(vec)
-        if norm > 0:
-            vec = vec / norm
-        return vec.astype(np.float32)
-
-    @staticmethod
-    def _coerce(raw: PositronAngleRecord | Dict[str, Any]) -> PositronAngleRecord:
-        if isinstance(raw, PositronAngleRecord):
-            return raw
-        return PositronAngleRecord(
-            coord=raw["coord"],
-            z=raw["z"],
-            energy=raw["energy"],
-            view=raw["view"],
-            angle=raw["angle"],
-            event_id=raw.get("event_id"),
-            group_id=raw.get("group_id"),
-            pion_stop=raw.get("pion_stop"),
+            hit_pdgs=raw.get("hit_pdgs"),
+            class_energies=raw.get("class_energies"),
+            hit_labels=raw.get("hit_labels"),
+            true_pion_stop=raw.get("true_pion_stop"),
+            true_angle_vector=raw.get("true_angle_vector"),
+            pred_pion_stop=raw.get("pred_pion_stop"),
         )
 
 class SplitterGraphDataset(Dataset):
     """
     Dataset for the splitter network.
 
-    - Uses the same standardized node features as GraphGroupDataset:
+    - Uses standardized node features similar to GraphGroupDataset, but adds group_energy:
       [coord, z, energy, view, group_energy]
     - Expects per-hit multi-label targets in GraphRecord.hit_labels
       with shape [num_hits, 3] corresponding to [is_pion, is_muon, is_mip].
@@ -458,3 +296,6 @@ class SplitterGraphDataset(Dataset):
             hit_labels=raw.get("hit_labels"),
             group_probs=raw.get("group_probs"),
         )
+
+
+
