@@ -21,7 +21,7 @@ from torch_geometric.data import Data
 
 from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader
-
+from torch_geometric.utils import dense_to_sparse
 
 
 
@@ -91,6 +91,16 @@ class GraphRecord:
     true_pion_stop: Optional[Sequence[float]] = None
     true_angle_vector: Optional[Sequence[float]] = None
     pred_pion_stop: Optional[Sequence[float]] = None
+    pred_endpoints: Optional[Sequence[Sequence[Sequence[float]]]] = None   # [Start/End, XYZ, Quantiles]
+    matched_pion_index: Optional[int] = None
+    pion_stop_for_angle: Optional[Sequence[float]] = None
+    true_arc_length: Optional[float] = None
+
+    def __getitem__(self, key):
+        """Allow subscript access for backward compatibility."""
+        if not isinstance(key, str):
+            raise TypeError(f"GraphRecord key must be a string, got {type(key)}")
+        return getattr(self, key)
 
 
 class GraphGroupDataset(Dataset):
@@ -138,6 +148,7 @@ class GraphGroupDataset(Dataset):
             for lbl in item.labels:
                 if 0 <= lbl < self.num_classes:
                     label_tensor[lbl] = 1.0
+            data.y_group = label_tensor.unsqueeze(0)
             data.y = label_tensor
             
         if item.hit_pdgs is not None:
@@ -174,12 +185,24 @@ class GraphGroupDataset(Dataset):
             # shape: [1, 3]
             data.pred_pion_stop = torch.tensor(item.pred_pion_stop, dtype=torch.float).unsqueeze(0)
 
+        if item.group_probs is not None:
+            data.group_probs = torch.tensor(item.group_probs, dtype=torch.float).unsqueeze(0)
+
+        if item.true_arc_length is not None:
+            data.y_arc = torch.tensor([item.true_arc_length], dtype=torch.float).unsqueeze(0)
+
         return data
 
     @staticmethod
     def _coerce(raw: Dict[str, Any] | GraphRecord) -> GraphRecord:
+        # Fast path for same-class instance
         if isinstance(raw, GraphRecord):
             return raw
+        
+        # Duck typing for stale instances (from previous reloads)
+        if hasattr(raw, 'coord'):
+            return raw
+
         return GraphRecord(
             coord=raw["coord"],
             z=raw["z"],
@@ -194,108 +217,106 @@ class GraphGroupDataset(Dataset):
             true_pion_stop=raw.get("true_pion_stop"),
             true_angle_vector=raw.get("true_angle_vector"),
             pred_pion_stop=raw.get("pred_pion_stop"),
-        )
-
-class SplitterGraphDataset(Dataset):
-    """
-    Dataset for the splitter network.
-
-    - Uses standardized node features similar to GraphGroupDataset, but adds group_energy:
-      [coord, z, energy, view, group_energy]
-    - Expects per-hit multi-label targets in GraphRecord.hit_labels
-      with shape [num_hits, 3] corresponding to [is_pion, is_muon, is_mip].
-    - Optionally appends group-level classifier probabilities
-      [p_pi, p_mu, p_mip] to each node's feature vector.
-    """
-
-    def __init__(
-        self,
-        records: Sequence[GraphRecord | dict],
-        *,
-        use_group_probs: bool = False,
-    ):
-        # Normalize to GraphRecord
-        self.items: list[GraphRecord] = [self._coerce(item) for item in records]
-        self.use_group_probs = use_group_probs
-
-    def __len__(self) -> int:
-        return len(self.items)
-
-    def __getitem__(self, index: int) -> Data:
-        item = self.items[index]
-
-        coord = np.asarray(item.coord, dtype=np.float32)
-        z_pos = np.asarray(item.z, dtype=np.float32)
-        energy = np.asarray(item.energy, dtype=np.float32)
-        view = np.asarray(item.view, dtype=np.float32)
-
-        if not (coord.shape == z_pos.shape == energy.shape == view.shape):
-            raise ValueError("All per-hit arrays must share the same shape.")
-
-        num_hits = coord.shape[0]
-        group_energy = np.full(num_hits, energy.sum(), dtype=np.float32)
-
-        # Base node features: identical to GraphGroupDataset
-        base_features = np.stack(
-            [coord, z_pos, energy, view, group_energy],
-            axis=1,
-        )  # [N, 5]
-
-        # Optional classifier probabilities [p_pi, p_mu, p_mip]
-        if self.use_group_probs and item.group_probs is not None:
-            probs = np.asarray(item.group_probs, dtype=np.float32)  # [3]
-            if probs.shape != (3,):
-                raise ValueError(f"group_probs must have shape (3,), got {probs.shape}")
-            probs_expanded = np.repeat(probs[None, :], num_hits, axis=0)  # [N, 3]
-            node_features = np.concatenate([base_features, probs_expanded], axis=1)  # [N, 8]
-        else:
-            node_features = base_features  # [N, 5]
-
-        x = torch.tensor(node_features, dtype=torch.float)
-
-        # Per-hit multi-label targets: [N, 3] of 0/1
-        if item.hit_labels is None:
-            raise ValueError("SplitterGraphDataset requires GraphRecord.hit_labels for each record.")
-
-        labels_arr = np.asarray(item.hit_labels, dtype=np.float32)
-        if labels_arr.shape[0] != num_hits:
-            raise ValueError(
-                f"hit_labels length {labels_arr.shape[0]} does not match number of hits {num_hits}"
-            )
-        if labels_arr.ndim != 2 or labels_arr.shape[1] != 3:
-            raise ValueError(
-                f"hit_labels must have shape [num_hits, 3] (pion, muon, mip), got {labels_arr.shape}"
-            )
-
-        y = torch.tensor(labels_arr, dtype=torch.float)  # [N, 3]
-
-        edge_index = fully_connected_edge_index(num_hits, device=x.device)
-        edge_attr = build_edge_attr(x, edge_index)
-
-        data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr, y=y)
-
-        if item.event_id is not None:
-            data.event_id = torch.tensor(int(item.event_id), dtype=torch.long)
-        if item.group_id is not None:
-            data.group_id = torch.tensor(int(item.group_id), dtype=torch.long)
-
-        return data
-
-    @staticmethod
-    def _coerce(raw: GraphRecord | dict) -> GraphRecord:
-        if isinstance(raw, GraphRecord):
-            return raw
-        return GraphRecord(
-            coord=raw["coord"],
-            z=raw["z"],
-            energy=raw["energy"],
-            view=raw["view"],
-            labels=raw.get("labels"),
-            event_id=raw.get("event_id"),
-            group_id=raw.get("group_id"),
-            hit_labels=raw.get("hit_labels"),
+            matched_pion_index=raw.get("matched_pion_index"),
+            pion_stop_for_angle=raw.get("pion_stop_for_angle"),
             group_probs=raw.get("group_probs"),
+            true_arc_length=raw.get("true_arc_length"),
+
         )
+
+def build_event_graph(container, device, radius_z: float = 0.5):
+    """
+    Converts EventContainer to graph inputs for EventBuilder.
+    Now builds inter-group connections purely based on Z-distance.
+    """
+    # 1. Collect all hits and their metadata
+    node_features_list = []
+    group_indices_list = []
+    group_origins = []
+    
+    for g_idx, record in enumerate(container.records):
+        # Base Data
+        coords = record.coord
+        zs = record.z
+        energies = record.energy
+        views = record.view
+        num_hits = len(coords)
+        
+        # --- Feature Engineering ---
+        # Upstream: Broadcast group-level probs [3] -> [num_hits, 3]
+        if record.group_probs is not None:
+             probs = torch.tensor(record.group_probs, dtype=torch.float32).repeat(num_hits, 1)
+        else:
+             probs = torch.zeros(num_hits, 3)
+             
+        # Upstream: Broadcast predicted endpoints [18] -> [num_hits, 18]
+        if record.pred_endpoints is not None:
+            eps = torch.tensor(record.pred_endpoints, dtype=torch.float32).view(-1).repeat(num_hits, 1)
+        else:
+            eps = torch.zeros(num_hits, 18)
+            
+        base = torch.tensor(np.stack([coords, zs, energies, views], axis=1), dtype=torch.float32)
+        
+        # Concatenate Features: [4] + [3] + [18] = 25
+        feats = torch.cat([base, probs, eps], dim=1)
+        node_features_list.append(feats)
+        
+        # Track Group IDs and Origins
+        group_indices_list.append(torch.full((num_hits,), g_idx, dtype=torch.long))
+        group_origins.append(container.origins[g_idx])
+        
+    # Stack all nodes into single tensors
+    if not node_features_list:
+        return None
+
+    x = torch.cat(node_features_list, dim=0).to(device) # [TotalHits, 25]
+    group_indices = torch.cat(group_indices_list, dim=0).to(device) # [TotalHits]
+    num_groups = len(container.records)
+    
+    # 2. Build Targets [N, N]
+    origins = torch.tensor(group_origins, device=device)
+    affinity_targets = (origins.unsqueeze(1) == origins.unsqueeze(0)).float()
+    
+    # 3. Build Edges (Vectorized & Z-Only)
+    
+    # Extract columns for efficient masking
+    z_col = x[:, 1]
+    
+    # Create broadcasted matrices for comparison [N, N]
+    g_i = group_indices.unsqueeze(1)
+    g_j = group_indices.unsqueeze(0)
+    
+    # A. Intra-Group Edges (Fully Connected)
+    intra_mask = (g_i == g_j)
+    
+    # B. Inter-Group Edges (Pure Z-Radius)
+    # Logic: Connect if Z-distance < radius_z AND they are in different groups.
+    # We ignore X/Y distance here; the GNN will see the X/Y diff in the edge attributes.
+    dist_z = torch.abs(z_col.unsqueeze(1) - z_col.unsqueeze(0))
+    
+    inter_mask = (dist_z < radius_z) & (g_i != g_j)
+    
+    # C. Combine All Edges
+    final_adj = intra_mask | inter_mask
+    edge_index, _ = dense_to_sparse(final_adj)
+    
+    # 4. Compute Edge Attributes
+    src, dst = edge_index
+    u, v = x[src], x[dst]
+    
+    diffs = u[:, :3] - v[:, :3] # coord, z, energy diffs
+    is_same_view = (u[:, 3] == v[:, 3]).float().unsqueeze(1)
+    is_same_group = (group_indices[src] == group_indices[dst]).float().unsqueeze(1)
+    
+    # Attr: [dx, dz, dE, same_view, same_group]
+    edge_attr = torch.cat([diffs, is_same_view, is_same_group], dim=1)
+        
+    return x, edge_index, edge_attr, group_indices, num_groups, affinity_targets
+
+
+
+
+
 
 
 

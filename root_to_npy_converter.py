@@ -83,9 +83,6 @@ def group_hits_in_time(allHits, time_window_ns=GROUP_WINDOW):
             current_group.append(hit)
             group_time = time
         else:
-            # For the legacy code, they appended total energy here, but we are reconstructing the hit list differently.
-            # The user wants specific 13-element arrays. The input 'hit' here is already the 11-element array (without angle).
-            # We will handle the angle appending later.
             groups.append(np.array(current_group))
             current_group = [hit]
             group_time = time
@@ -178,16 +175,7 @@ def process_and_save(root_files_pattern, output_dir, geohelper_file, max_events=
         if not triggered:
             continue
 
-        # Extract Positron Angle (Truth) using legacy logic
         thetaInit, phiInit = -1000, -1000
-        
-        # Determine run type from filename or assume based on structure?
-        # The legacy code checks `if run == 'michel':` and `elif run == 'pie':`.
-        # Since we are processing files, we need to infer this or handle both.
-        # Let's infer from the number of daughters as a heuristic if run name isn't available,
-        # or try to parse the filename.
-        # However, the legacy code iterates `sample_chains.items()` where keys are run names.
-        # Here we iterate a chain. Let's try to handle both cases based on nD.
         
         for decay in entry.decay:
             nD = decay.GetNDaughters()
@@ -203,11 +191,6 @@ def process_and_save(root_files_pattern, output_dir, geohelper_file, max_events=
                 thetaInit = mom.Theta()
                 phiInit = mom.Phi()
                 break
-        
-        # If no angle found (e.g. not a decay event we care about?), maybe skip?
-        # But legacy code had specific logic for 'michel' and 'pie'. 
-        # Let's assume if we found a positron in ATAR, there should be an angle.
-        # If thetaInit is still -1000, we might want to skip this event for training angle.
         
         pion_in_atar = 0
         positron_in_atar = 0
@@ -239,7 +222,7 @@ def process_and_save(root_files_pattern, output_dir, geohelper_file, max_events=
 
             truePositions = [atarHit.GetX1(), atarHit.GetY1(), atarHit.GetZ1()]
 
-            # Base hit structure (13 elements) - User requested theta/phi on ALL hits
+            # Base hit structure (13 elements)
             # [coord, z, stripType, energySmeared, hitTime, pdg_binary, eventNumber, truePositions[0], truePositions[1], truePositions[2], true_time, theta, phi]
             hit = np.array([coord, z, stripType, energySmeared, hitTime, pdg_binary, i, truePositions[0], truePositions[1], truePositions[2], true_time, thetaInit, phiInit])
 
@@ -374,12 +357,20 @@ def process_and_save(root_files_pattern, output_dir, geohelper_file, max_events=
                     use_times = times
                     use_pos = pos
                 
-                # Find start (min time) and end (max time)
-                start_idx = np.argmin(use_times)
-                end_idx = np.argmax(use_times)
+                # Sort by time for arc length calculation
+                sort_idx = np.argsort(use_times)
+                sorted_pos = use_pos[sort_idx]
                 
-                startX, startY, startZ = use_pos[start_idx]
-                endX, endY, endZ = use_pos[end_idx]
+                # Calculate True Arc Length
+                # Sum of Euclidean distances between consecutive time-sorted hits
+                diffs = np.diff(sorted_pos, axis=0) # [N-1, 3]
+                segment_lengths = np.linalg.norm(diffs, axis=1) # [N-1]
+                true_arc_length = np.sum(segment_lengths)
+
+                # Find start (min time) and end (max time)
+                # Since we sorted, start is 0, end is -1
+                startX, startY, startZ = sorted_pos[0]
+                endX, endY, endZ = sorted_pos[-1]
 
                 group_info = [
                     pionInGroup, muonInGroup, MIPinGroup,
@@ -387,7 +378,8 @@ def process_and_save(root_files_pattern, output_dir, geohelper_file, max_events=
                     totalPionEnergy, totalMuonEnergy, totalMIPEnergy,
                     theta, phi, eventID,
                     startX, startY, startZ,
-                    endX, endY, endZ
+                    endX, endY, endZ,
+                    true_arc_length
                 ]
                 
                 eventTimeGroups.append(group_hits_data)

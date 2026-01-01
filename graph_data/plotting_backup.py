@@ -13,26 +13,42 @@ from typing import Optional, Tuple, Union, List, Sequence
 from .utils import GraphRecord
 
 def plot_event_display(
-    records: Union['GraphRecord', Sequence['GraphRecord']],
+    records: Union[GraphRecord, Sequence[GraphRecord]],
     pred_points: Optional[Union[np.ndarray, torch.Tensor, List[List[float]]]] = None,
     pred_labels: Optional[Union[np.ndarray, List[int]]] = None,
-    pred_uncert: Optional[Union[np.ndarray, torch.Tensor]] = None,
-    custom_hit_alphas: Optional[Union[np.ndarray, List[float]]] = None,
-    pileup_sets: Optional[List[List[int]]] = None,
     save_path: Optional[str] = None,
     show: bool = True,
     figsize: Tuple[int, int] = (12, 8),
     fixed_axes: bool = True,
-    color_mode: str = 'pdg', 
+    color_mode: str = 'pdg', # 'pdg', 'record', 'correctness', 'pred'
     title: Optional[str] = None
 ) -> Optional[plt.Figure]:
     """
     Generates an event display for one or more GraphRecord objects.
-    Fully compatible with previous versions, added support for custom_hit_alphas.
+    
+    Args:
+        records: A single GraphRecord or a list/sequence of GraphRecords to overlay.
+        pred_points: Optional predicted points [N, 3] or [N, 2, 3] etc. Flattened to list of points.
+                     Each point is [x, y, z].
+        pred_labels: Optional predicted per-hit labels [N_hits]. Should match truth PDG codes.
+                     If provided, must match total number of hits in 'records'.
+        save_path: Optional path to save the figure.
+        show: Whether to display the plot.
+        figsize: Size of the figure.
+        fixed_axes: Whether to use fixed axis limits (legacy style).
+        color_mode: Coloring strategy:
+                    'pdg': Color by true particle type (hit_pdgs).
+                    'record': Color by record/group ID.
+                    'correctness': Green for correct prediction, Red for incorrect.
+                    'pred': Color by predicted particle type (pred_labels).
+        title: Optional custom title for the figure.
+
+    Returns:
+        The matplotlib Figure object.
     """
     
     # Normalize inputs
-    if hasattr(records, 'coord') and hasattr(records, 'z'):
+    if isinstance(records, GraphRecord):
         records_list = [records]
     else:
         records_list = list(records)
@@ -49,10 +65,12 @@ def plot_event_display(
         else:
             pts = pred_points
             
+        # Detect if we have [N, 2, 3] (pairs of endpoints)
         if pts.ndim == 3 and pts.shape[1] == 2 and pts.shape[2] == 3:
-            final_preds = pts 
+            final_preds = pts # Keep structure [N, 2, 3]
             is_endpoint_pairs = True
         else:
+            # Flatten to (-1, 3) for generic points
             if pts.ndim > 1:
                 pts = pts.reshape(-1, 3)
             final_preds = pts
@@ -84,30 +102,16 @@ def plot_event_display(
     }
     default_color = ("gray", "Other")
     
-    # Colormap for record/event mode
+    # Colormap for record mode (tab10 is good for distinct groups)
     cmap = plt.get_cmap('tab10')
-    
-    # Pre-calc event colors if needed
-    event_color_map = {}
-    if color_mode == 'event':
-        unique_events = sorted(list(set(r.event_id for r in records_list if r.event_id is not None)))
-        for i, eid in enumerate(unique_events):
-            event_color_map[eid] = cmap(i % 10)
 
-    pileup_map = {}
-    if color_mode == 'pileup' and pileup_sets is not None:
-        for p_id, group_indices in enumerate(pileup_sets):
-            # Assign a unique color to this Set (Predicted Event)
-            c = cmap(p_id % 10)
-            for g_idx in group_indices:
-                pileup_map[g_idx] = c
+    # Calculate global hit index offset for predictions
+    global_hit_offset = 0
 
     # Plotting Loop (Views 0 and 1)
     for i in range(2):
         ax = axs[i]
-        
-        # --- NEW: Track global index to slice custom alphas correctly ---
-        current_global_idx = 0
+        current_view_offset = 0
         
         # 1. Plot Hits for ALL records
         for idx, rec in enumerate(records_list):
@@ -123,130 +127,137 @@ def plot_event_display(
             else:
                 pdgs = np.zeros_like(coord, dtype=int)
             
-            # --- NEW: Extract Alpha Slice for this record ---
-            # Default to 0.6
-            rec_alphas_all = np.full(num_hits_in_rec, 0.6)
-            
-            if custom_hit_alphas is not None:
-                # Ensure we don't index out of bounds
-                end_idx = min(current_global_idx + num_hits_in_rec, len(custom_hit_alphas))
-                slice_len = end_idx - current_global_idx
-                if slice_len > 0:
-                    rec_alphas_all[:slice_len] = np.array(custom_hit_alphas[current_global_idx : end_idx])
-            
-            # Save start index for predictions logic before incrementing
-            rec_start_idx_for_preds = current_global_idx
-            
-            # Increment global counter
-            current_global_idx += num_hits_in_rec
+            # Extract predictions for this record if available
+            rec_preds = None
+            if predictions is not None:
+                # Assuming predictions are concatenated in order of records
+                # This logic requires careful alignment:
+                # If we are in view loop i=0, we shouldn't consume offset.
+                # Offset should be handled outside view loop or reset.
+                # Actually, easier to slice:
+                if i == 0: # Only calculate slice on first view pass
+                     pass 
+                # Wait, 'predictions' is for ALL hits (both views).
+                # We need to slice predictions for this specific record.
+                # BUT 'records_list' is iterated inside the view loop.
+                # We need to compute the slice indices correctly.
+                
+                # To avoid re-computation complexity, let's look up by hit index.
+                # We can trace global hit index.
+                pass
 
-            # Filter by View
             view_mask = (view == i)
             
             hZ = z[view_mask]
             hCoord = coord[view_mask]
             hE = energy[view_mask]
             hPDGs = pdgs[view_mask]
-            hAlphas = rec_alphas_all[view_mask] # Apply view mask to alphas
             
-            # Color Selection Logic (Original)
-            colors = []
-            alphas_calculated = [] # To store mode-specific alphas (e.g. classification)
+            # Get predictions corresponding to these specific hits
+            # We need the INDICES of these hits in the original record
+            # And the offset of this record in the global list
             
+            # Let's simplify:
+            # We need the global index for each hit to fetch its prediction.
+            # Record 0 hits [0, N0), Record 1 hits [N0, N0+N1), etc.
+            
+            # This requires knowing start_index of 'rec' in the global predictions.
+            # We can compute start_indices beforehand.
+            pass
+
             if color_mode == 'record':
+                # Use event_id if valid, else index
+                e_id = rec.event_id
                 c = cmap(idx % 10)
                 colors = [c] * len(hZ)
-                alphas_calculated = [0.6] * len(hZ)
-            elif color_mode == 'event':
-                e_id = rec.event_id
-                c = event_color_map.get(e_id, 'gray') if e_id is not None else 'gray'
-                colors = [c] * len(hZ)
-                alphas_calculated = [0.6] * len(hZ)
-            elif color_mode == 'pileup':
-                # Look up the color for this record index
-                c = pileup_map.get(idx, 'gray') 
-                colors = [c] * len(hZ)
-                alphas_calculated = [0.6] * len(hZ)
+                alphas = [0.6] * len(hZ)
             elif color_mode == 'classification':
                 if predictions is None:
+                    # Fallback if no preds
                     colors = ['gray'] * len(hZ)
-                    alphas_calculated = [0.6] * len(hZ)
+                    alphas = [0.6] * len(hZ)
                 else:
-                    # Logic to find predictions for these specific hits
-                    # We use the index tracking we just did
-                    rec_indices = np.where(view_mask)[0]
-                    global_indices = rec_start_idx_for_preds + rec_indices
+                    # Calculate start index for this record
+                    start_idx = sum(len(r.coord) for r in records_list[:idx])
                     
-                    if len(global_indices) > 0 and global_indices[-1] < len(predictions):
-                        rec_pred_slice = predictions[global_indices]
-                        
-                        colors = []
-                        for p in hPDGs:
-                            colors.append(particle_colors.get(p, default_color)[0])
-                        
-                        alphas_calculated = []
-                        for true_pdg, pred_pdg in zip(hPDGs, rec_pred_slice):
-                            if true_pdg == pred_pdg:
-                                alphas_calculated.append(1.0) # Correct
-                            else:
-                                alphas_calculated.append(0.3) # Incorrect
-                    else:
-                        colors = ['gray'] * len(hZ)
-                        alphas_calculated = [0.6] * len(hZ)
+                    # Indices of current view hits within the record
+                    rec_indices = np.where(view_mask)[0]
+                    
+                    # Global indices
+                    global_indices = start_idx + rec_indices
+                    
+                    rec_pred_slice = predictions[global_indices]
+                    
+                    # Determine alpha based on correctness
+                    # Color based on TRUE PDG
+                    colors = []
+                    for p in hPDGs:
+                        colors.append(particle_colors.get(p, default_color)[0])
+                    
+                    alphas = []
+                    for true_pdg, pred_pdg in zip(hPDGs, rec_pred_slice):
+                        if true_pdg == pred_pdg:
+                            alphas.append(1.0) # Correct
+                        else:
+                            alphas.append(0.3) # Incorrect
+                    
             elif color_mode == 'pred':
                 if predictions is None:
                     colors = ['gray'] * len(hZ)
                 else:
+                    start_idx = sum(len(r.coord) for r in records_list[:idx])
                     rec_indices = np.where(view_mask)[0]
-                    global_indices = rec_start_idx_for_preds + rec_indices
-                    if len(global_indices) > 0 and global_indices[-1] < len(predictions):
-                        rec_pred_slice = predictions[global_indices]
-                        colors = [particle_colors.get(p, default_color)[0] for p in rec_pred_slice]
-                    else:
-                        colors = ['gray'] * len(hZ)
-                alphas_calculated = [0.6] * len(hZ)
+                    global_indices = start_idx + rec_indices
+                    rec_pred_slice = predictions[global_indices]
+                    
+                    colors = [particle_colors.get(p, default_color)[0] for p in rec_pred_slice]
+                alphas = [0.6] * len(hZ)
             else: # 'pdg' or unknown
                 colors = [particle_colors.get(p, default_color)[0] for p in hPDGs]
-                alphas_calculated = [0.6] * len(hZ)
+                alphas = [0.6] * len(hZ)
             
             sizes = 100 * hE 
             
-            # --- MERGE ALPHAS & PLOT ---
-            # Priority: 1. custom_hit_alphas (if provided) 2. mode-calculated alphas
-            final_alphas = hAlphas if custom_hit_alphas is not None else alphas_calculated
+            # Scatter needs list of alphas or single alpha. Matplotlib scatter accepts alpha array?
+            # No, standard matplotlib scatter alpha arg is scalar.
+            # To have varying alpha, we must use RGBA colors.
             
-            # Matplotlib scatter needs RGBA to support variable alphas.
-            # Convert colors + alphas to RGBA.
-            rgba_colors = []
-            for c, a in zip(colors, final_alphas):
-                try:
-                    rgb = mcolors.to_rgb(c)
-                    rgba_colors.append(rgb + (a,))
-                except ValueError:
-                    rgba_colors.append((0.5, 0.5, 0.5, a))
-            
-            # Plot using RGBA colors
-            ax.scatter(hZ, hCoord, c=rgba_colors, s=sizes, edgecolors='none')
+            if color_mode == 'classification' and predictions is not None:
+                # Convert colors to RGBA with per-point alpha
+                rgba_colors = []
+                for c, a in zip(colors, alphas):
+                    # Get RGB from name
+                    try:
+                        rgb = mcolors.to_rgb(c)
+                        rgba_colors.append(rgb + (a,))
+                    except ValueError:
+                        print(f"DEBUG: Invalid color {c}")
+                        rgba_colors.append((0.5, 0.5, 0.5, a))
+                        
+                ax.scatter(hZ, hCoord, c=rgba_colors, s=sizes, edgecolors='none')
+            else:
+                # Use scalar alpha
+                # If alphas list exists and is uniform, use first. Else...
+                # For safety in other modes, use 0.6
+                scalar_alpha = alphas[0] if alphas else 0.6
+                ax.scatter(hZ, hCoord, c=colors, s=sizes, alpha=scalar_alpha, edgecolors='none')
 
             # 2. Plot True Endpoints (for this record)
-            if color_mode in ['record', 'event']:
-                ep_color = colors[0] if colors else 'black'
-            else:
-                ep_color = 'black'
-            
-            # Use mean alpha to determine ghosting of endpoints
-            ep_alpha = np.mean(final_alphas) if len(final_alphas) > 0 else 0.6
+            # Use same color as scatter if record mode, else black
+            ep_color = cmap(idx % 10) if color_mode == 'record' else 'black'
             
             if rec.true_start is not None:
                 ts = np.array(rec.true_start)
-                ax.plot(ts[2], ts[i], marker='x', color=ep_color, alpha=ep_alpha, markersize=10, markeredgewidth=2)
+                ax.plot(ts[2], ts[i], marker='x', color=ep_color, markersize=10, markeredgewidth=2)
             if rec.true_end is not None:
                 te = np.array(rec.true_end)
-                ax.plot(te[2], te[i], marker='x', color=ep_color, alpha=ep_alpha, markersize=12, markeredgewidth=2)
+                ax.plot(te[2], te[i], marker='x', color=ep_color, markersize=12, markeredgewidth=2)
 
-        # 3. Plot Predicted Points (Restored)
+        # 3. Plot Predicted Points (if available) - Moved outside record loop for batch preds
         if len(final_preds) > 0:
             if is_endpoint_pairs:
+                # final_preds shape is [N_records, 2, 3] or [1, 2, 3] broadcasted
+                num_preds = len(final_preds)
                 for p_idx, pair in enumerate(final_preds):
                     ps = pair[0]
                     pe = pair[1]
@@ -254,6 +265,7 @@ def plot_event_display(
                     ax.plot(pe[2], pe[i], marker='+', color='red', markersize=12, markeredgewidth=2)
                     ax.plot([ps[2], pe[2]], [ps[i], pe[i]], color='red', linestyle='--', alpha=0.5)
             else:
+                # Generic points [N, 3]
                 z_preds = final_preds[:, 2]
                 coord_preds = final_preds[:, i]
                 ax.scatter(z_preds, coord_preds, marker='x', c='lime', s=100, zorder=10, label='Predicted' if i==0 else None)
@@ -271,28 +283,25 @@ def plot_event_display(
             ax.grid(True, linestyle='--', alpha=0.5)
             ax.autoscale(enable=True, axis='both', tight=False)
 
-        # Legend (Restored)
+        # Legend (View 0 only)
         if i == 0:
             legend_patches = []
             seen_labels = set()
             
             if color_mode == 'record':
+                # Create legend for each record
                 for idx in range(len(records_list)):
                     e_id = records_list[idx].event_id
                     label = f"Event {e_id}" if e_id is not None else f"Record {idx}"
                     c = cmap(idx % 10)
                     legend_patches.append(mpatches.Patch(color=c, label=label))
-            elif color_mode == 'event':
-                 for eid, color in event_color_map.items():
-                     legend_patches.append(mpatches.Patch(color=color, label=f"Event {eid}"))
-            elif color_mode == 'pileup' and pileup_sets is not None:
-                for p_id in range(len(pileup_sets)):
-                    c = cmap(p_id % 10)
-                    legend_patches.append(mpatches.Patch(color=c, label=f"Pred Event {p_id}"))
             else:
+                # PDG or Pred or Classification Legend
+                # In classification mode, we still show PDG Colors.
                 if color_mode == 'pred' and predictions is not None:
                     source_pdgs = predictions
                 else:
+                    # Collect particle types from ALL records (True PDGs)
                     all_pdgs = []
                     for r in records_list:
                         if r.hit_pdgs is not None:
@@ -306,32 +315,29 @@ def plot_event_display(
                     if l not in seen_labels:
                         legend_patches.append(mpatches.Patch(color=c, label=l))
                         seen_labels.add(l)
+                
+
             
+            # Add markers
             if color_mode == 'pdg' or color_mode == 'pred':
                 legend_patches.append(Line2D([0], [0], marker='x', color='black', linestyle='None', markersize=8, label='True Start/End'))
             
             if len(final_preds) > 0:
-                 legend_patches.append(Line2D([0], [0], marker='x', color='red', linestyle='None', markersize=10, label='Predicted'))
+                 legend_patches.append(Line2D([0], [0], marker='x', color='lime', linestyle='None', markersize=10, label='Predicted Start/End' if is_endpoint_pairs else 'Predicted'))
 
             if len(legend_patches) > 0:
                 ax.legend(handles=legend_patches, loc='upper right')
 
-        # 5. Plot Uncertainty Boxes (Restored)
-        if pred_uncert is not None:
-             if isinstance(pred_uncert, (np.ndarray, torch.Tensor)) and pred_uncert.ndim == 3:
-                for pt_idx in range(2): 
-                    q16 = pred_uncert[pt_idx, 0] 
-                    q84 = pred_uncert[pt_idx, 1]
-                    if i == 0: 
-                        rect = mpatches.Rectangle((q16[2], q16[0]), q84[2]-q16[2], q84[0]-q16[0], linewidth=1, edgecolor='red', facecolor='red', alpha=0.15)
-                        ax.add_patch(rect)
-                    elif i == 1: 
-                        rect = mpatches.Rectangle((q16[2], q16[1]), q84[2]-q16[2], q84[1]-q16[1], linewidth=1, edgecolor='red', facecolor='red', alpha=0.15)
-                        ax.add_patch(rect)
 
     plt.tight_layout()
-    if save_path: plt.savefig(save_path, dpi=150)
-    if show: plt.show()
+    
+    if save_path:
+        plt.savefig(save_path, dpi=150)
+        print(f"Event display saved to {save_path}")
+        
+    if show:
+        plt.show()
+        
     return fig
 
 def plot_event_pileup(
@@ -818,7 +824,6 @@ def plot_pull_distributions(output, target, particle_ids=None, save_dir='plots',
         
     plt.tight_layout()
     plt.savefig(os.path.join(save_dir, f'pull_distribution_epoch_{epoch:02d}.png'))
-    plt.show()
     plt.close()
     
     # 4. Coverage Analysis
@@ -847,9 +852,6 @@ def plot_endpoint_error_distributions(errors_by_class, epoch, save_dir='plots'):
     color_start = 'tab:blue'
     color_end = 'tab:orange'
     
-    # Fixed binning for consistent comparison
-    bins = np.linspace(0, 2, 101)
-    
     for i in range(3):
         ax = axes[i]
         
@@ -860,13 +862,19 @@ def plot_endpoint_error_distributions(errors_by_class, epoch, save_dir='plots'):
         has_data = len(start_data) > 0
         
         if has_data:
-            # Stats (using numpy for safety)
-            mean_s = np.mean(start_data) if start_data else 0.0
-            std_s = np.std(start_data) if start_data else 0.0
-            mean_e = np.mean(end_data) if end_data else 0.0
-            std_e = np.std(end_data) if end_data else 0.0
+            # Stats
+            mean_s = np.mean(start_data)
+            std_s = np.std(start_data)
+            mean_e = np.mean(end_data)
+            std_e = np.std(end_data)
             
             # Histograms
+            # Use same bins for both
+            combined_data = start_data + end_data
+            min_val = min(min(combined_data), 0)
+            max_val = max(combined_data) if combined_data else 1.0
+            bins = np.linspace(min_val, min(max_val, 20), 50) # Cap at 20cm for visibility
+            
             ax.hist(start_data, bins=bins, alpha=0.5, color=color_start, label='Start', density=True)
             ax.hist(end_data, bins=bins, alpha=0.5, color=color_end, label='End', density=True)
             
@@ -874,7 +882,7 @@ def plot_endpoint_error_distributions(errors_by_class, epoch, save_dir='plots'):
             ax.axvline(mean_s, color=color_start, linestyle='--', linewidth=1.5)
             ax.axvline(mean_e, color=color_end, linestyle='--', linewidth=1.5)
             
-            # Text stats (Top Right)
+            # Text stats
             stats_text = (
                 f"START\nMean: {mean_s:.2f}\nStd: {std_s:.2f}\n\n"
                 f"END\nMean: {mean_e:.2f}\nStd: {std_e:.2f}"
@@ -887,15 +895,12 @@ def plot_endpoint_error_distributions(errors_by_class, epoch, save_dir='plots'):
             ax.text(0.5, 0.5, "No Data", ha='center', va='center')
 
         ax.set_title(f'{class_names[i]} Endpoint Error (Epoch {epoch})')
-        ax.set_xlabel('Euclidean Distance [mm]')
+        ax.set_xlabel('Euclidean Distance [cm]')
         ax.set_ylabel('Density')
-        # Legend at Top Left to avoid overlap with stats
-        ax.legend(loc='upper center')
+        ax.legend(loc='upper right')
         ax.grid(True, alpha=0.3)
-        ax.set_xlim(0, 2)
         
     plt.tight_layout()
     plt.savefig(os.path.join(save_dir, f'endpoint_error_dist_epoch_{epoch:02d}.png'))
-    plt.show()
     plt.close()
 
