@@ -1,0 +1,514 @@
+import ROOT
+import sys
+import os
+import numpy as np
+import glob
+from collections import Counter
+import random
+import argparse
+from tqdm import tqdm
+import pyarrow as pa
+import pyarrow.parquet as pq
+
+# --- GLOBALS & CONSTANTS ---
+kPidif = 0x0000000010
+
+PION      = 0b000001
+MUON      = 0b000010
+POSITRON  = 0b000100
+ELECTRON  = 0b001000
+GAMMA     = 0b010000  # Added Gamma (22)
+OTHER     = 0b100000
+
+MASK_TO_PDG = {
+    PION: 211, MUON: -13, POSITRON: -11, ELECTRON: 11, GAMMA: 22, OTHER: 98105
+}
+
+def pdg_to_mask(pdg_id):
+    if pdg_id == 211: return PION
+    elif pdg_id == -13: return MUON
+    elif pdg_id == -11: return POSITRON
+    elif pdg_id == 11:  return ELECTRON
+    elif pdg_id == 22:  return GAMMA
+    else:               return OTHER
+
+# --- ENERGY STRIPPING & CLUSTERING UTILS ---
+# Using the same gain suppression logic from `test_gainSatVar.py` for ATAR 
+# and smearing logic from `calorimeter_clustering.py` for LYSO
+GAIN_PARAMS = {
+    #"gain": 13.564, 
+    "gain": -1.0, 
+    "k": 0.5,        # Birks constant
+    "alpha": 1.0,    # Z dependence
+    "a": 2.937,      # Saturation A
+    "b": -0.239,     # Saturation B
+    "z_offset": 0.065,
+    "z_scale": 0.055,
+    "min_s_angle": np.tan(np.radians(9.0)) * 1000.0
+}
+
+def apply_atar_gain_suppression(edep, deds, z, params):
+    if params["gain"] <= 0: return edep
+    term1 = np.minimum(1.0, (deds / 0.03)**10)
+    z_fac = 1.0 - (z / params["z_scale"])
+    term2 = np.zeros_like(z_fac)
+    valid_z_mask = z_fac > 0
+    term2[valid_z_mask] = z_fac[valid_z_mask] ** params["alpha"]
+    kappaZ = 1.0 - params["k"] * term1 * term2
+    kappaZ = np.nan_to_num(kappaZ, nan=1.0)
+    quenched_edep = edep * kappaZ
+    sat_calc = params["a"] * (np.abs(deds)**params["b"])
+    saturation = np.where(deds > 0, sat_calc, 0.0)
+    gain_factor = np.minimum(params["gain"], saturation) / params["gain"]
+    return quenched_edep * gain_factor
+
+def smear_atar(energy, energy_resolution=0.15):
+    mask = energy > 0
+    smeared_energy = np.zeros_like(energy, dtype=np.float64)
+    valid_energies = energy[mask]
+    stdv = valid_energies * energy_resolution
+    noise = np.random.randn(len(valid_energies)) * stdv
+    smeared_energy[mask] = valid_energies + noise
+    return smeared_energy
+
+def process_root_file(file_list, geoheader, atarheader, geo_lookup, output_file, max_events=None):
+    """
+    Parses a list of ROOT files and directly flattens EVERY hit sequentially into a Parquet-ready dictionary/list.
+    """
+    chain = ROOT.TChain("sim")
+    if isinstance(file_list, str):
+        chain.Add(file_list)
+    else:
+        for f in file_list:
+            print(f"Adding {f} to chain...")
+            chain.Add(f)
+    entries = chain.GetEntries()
+    if max_events is not None:
+        entries = min(entries, max_events)
+        
+    print(f"Total entries to process: {entries}")
+
+    # For Parquet conversion we want columnar arrays of primitives or PyArrow lists
+    out_event_ids = []
+    
+    # ATAR Hit Features (Ragged Arrays / Lists of floats per event)
+    out_atar_x = []
+    out_atar_y = []
+    out_atar_z = []
+    out_atar_E = []
+    out_atar_t = []
+    out_atar_truth_t = []
+    out_atar_pdg = []
+    out_atar_view = []   # 0 for XZ, 1 for YZ
+    out_atar_slice = []  # Time slice IDs for hierarchical pooling
+    
+    # LYSO Hit Features
+    out_lyso_x = []
+    out_lyso_y = []
+    out_lyso_z = []
+    out_lyso_E = []
+    out_lyso_t = []
+    out_lyso_pdg = []
+    out_lyso_slice = []
+    
+    # Global Physics Truths
+    out_theta_init = []
+    out_phi_init = []
+    out_positron_energy = []
+    out_pion_start_x, out_pion_start_y, out_pion_start_z = [], [], []
+    out_pion_stop_x, out_pion_stop_y, out_pion_stop_z = [], [], []
+    out_muon_start_x, out_muon_start_y, out_muon_start_z = [], [], []
+    out_muon_stop_x, out_muon_stop_y, out_muon_stop_z = [], [], []
+    out_positron_start_x, out_positron_start_y, out_positron_start_z = [], [], []
+    out_positron_stop_x, out_positron_stop_y, out_positron_stop_z = [], [], []
+
+    for i, entry in tqdm(enumerate(chain), total=entries):
+        if i >= entries: break
+        
+        # 1. Base Quality Skims
+        eventType = int(entry.info.GetType())
+        if eventType & kPidif:
+            continue
+
+        triggered = 0
+        for upstream in entry.upstream:
+            if upstream.GetVID() == 99999:
+                if upstream.GetEdep() > 0.5:
+                    triggered = 1
+                    break
+        if not triggered:
+            continue
+
+        # 2. Extract Event Truths (Decay Kinematics)
+        nD = 0
+        thetaInit, phiInit = -1000.0, -1000.0
+        positron_initial_energy = 0.0
+        for decay in entry.decay:
+            nD = decay.GetNDaughters()
+            if nD == 3: # Michel
+                mom = decay.GetDaughterMomAt(0)
+                thetaInit = mom.Theta()
+                phiInit = mom.Phi()
+                positron_initial_energy = np.sqrt(mom.Mag2())
+                break
+            elif nD == 2: # Pi-E
+                if decay.GetDaughterPDGIDAt(0) == -13: continue
+                mom = decay.GetDaughterMomAt(0)
+                thetaInit = mom.Theta()
+                phiInit = mom.Phi()
+                positron_initial_energy = np.sqrt(mom.Mag2())
+                break
+                
+        if (thetaInit < 0) or (phiInit == -1000):
+            continue
+        #if np.degrees(thetaInit) > 130:
+        #    continue
+
+        # Temporary dictionaries for temporal merging within this event
+        event_hits_atar = {} # vol_id -> list of dicts: {'x':, 'y':, 'z':, 't':, 'E':, 'view':, 'pdg':}
+        event_hits_lyso = {} # vol_id -> list of dicts
+
+        pionStopX, pionStopY, pionStopZ = 0.0, 0.0, 0.0
+        endpoints = {
+            211: {'start': [np.nan]*3, 'stop': [np.nan]*3},
+            -13: {'start': [np.nan]*3, 'stop': [np.nan]*3},
+            -11: {'start': [np.nan]*3, 'stop': [np.nan]*3}
+        }
+
+        # 3. Track Hit Processing
+        for track in entry.track:
+            pdg = track.GetPDGID()
+            # Allow all particles to deposit energy (e.g. Gammas=22). Unrecognized PDGs get mapped to OTHER bitmask.
+            
+            # Accessors
+            post_x = np.frombuffer(track.GetPostX().data(), dtype=np.float32, count=track.GetPostX().size())
+            post_y = np.frombuffer(track.GetPostY().data(), dtype=np.float32, count=track.GetPostY().size())
+            post_z = np.frombuffer(track.GetPostZ().data(), dtype=np.float32, count=track.GetPostZ().size())
+            post_t = np.frombuffer(track.GetPostTime().data(), dtype=np.float32, count=track.GetPostTime().size())
+            edep_vec = np.frombuffer(track.GetEdep().data(), dtype=np.float32, count=track.GetEdep().size())
+            volumes = np.frombuffer(track.GetVolume().data(), dtype=np.int32, count=track.GetVolume().size())
+            
+            if len(post_x) > 0 and pdg in endpoints: 
+                start_pt = [float(post_x[0]), float(post_y[0]), float(post_z[0])]
+                stop_pt = [float(post_x[-1]), float(post_y[-1]), float(post_z[-1])]
+                
+                # Geant tracks might be fragmented, only record first point if empty
+                if np.isnan(endpoints[pdg]['start'][0]):
+                    endpoints[pdg]['start'] = start_pt
+                
+                # Continually update stop backwards so it catches the true end coordinate
+                endpoints[pdg]['stop'] = stop_pt
+                
+                if pdg == 211:
+                    pionStopX, pionStopY, pionStopZ = stop_pt
+
+            # 1. Geometry Mask
+            unique_vols, inverse = np.unique(volumes, return_inverse=True)
+            
+            is_atar_lookup = np.array([geoheader.GetDetectorType(int(v)) == ROOT.PIDetectorType.kAtar for v in unique_vols], dtype=bool)
+            is_lyso_lookup = np.array([geoheader.GetDetectorType(int(v)) == ROOT.PIDetectorType.kCalo for v in unique_vols], dtype=bool)
+
+            # Mask out empty steps early and apply strict logical digitization readout window
+            mask_energy = (edep_vec > 1e-4) & (post_t >= 0) & (post_t <= 10000)
+            inv_valid = inverse[mask_energy]
+            edep_valid = edep_vec[mask_energy]
+
+            if len(edep_valid) == 0: continue
+
+            # Energy-weighted centroids per volume (for this specific track)
+            sum_e = np.bincount(inv_valid, weights=edep_valid, minlength=len(unique_vols))
+            safe_div = np.where(sum_e == 0, 1.0, sum_e)
+
+            avg_x = np.bincount(inv_valid, weights=post_x[mask_energy] * edep_valid, minlength=len(unique_vols)) / safe_div
+            avg_y = np.bincount(inv_valid, weights=post_y[mask_energy] * edep_valid, minlength=len(unique_vols)) / safe_div
+            avg_z = np.bincount(inv_valid, weights=post_z[mask_energy] * edep_valid, minlength=len(unique_vols)) / safe_div
+            avg_t = np.bincount(inv_valid, weights=post_t[mask_energy] * edep_valid, minlength=len(unique_vols)) / safe_div
+            
+            # Store true unsmeared times before any smearing modifications
+            truth_t = avg_t.copy()
+
+            valid_indices = np.where(sum_e > 1e-4)[0]
+
+            atar_indices = valid_indices[is_atar_lookup[valid_indices]]
+            lyso_indices = valid_indices[is_lyso_lookup[valid_indices]]
+            
+            # Legacy Physical Smearing Validation (ATAR uses flat resolution)
+            if len(atar_indices) > 0:
+                avg_t[atar_indices] += np.random.normal(0, 0.2, size=len(atar_indices))
+                sum_e[atar_indices] = smear_atar(sum_e[atar_indices], 0.15)
+                
+            # Legacy Physical Smearing Validation (LYSO uses empirical energy-dependent resolutions)
+            if len(lyso_indices) > 0:
+                lyso_E_safe = np.maximum(sum_e[lyso_indices], 1e-9)
+            #     
+            #     # Energy Smear (a=6, b=50, c=1.2)
+            #     res_frac = np.sqrt((6 / np.sqrt(lyso_E_safe))**2 + (50 / lyso_E_safe)**2 + 1.2**2) / 100.0
+            #     sum_e[lyso_indices] = np.maximum(sum_e[lyso_indices] * (1 + np.random.normal(0, res_frac)), 0.05)
+            #     
+            #     # Time Smear (a=300, b=600, c=75 ps -> ns)
+            #     sigma_t = np.sqrt((300 / lyso_E_safe)**2 + (600 / np.sqrt(lyso_E_safe))**2 + 75**2) / 1000.0
+            #     avg_t[lyso_indices] += np.random.normal(0, sigma_t)
+
+            def merge_hit(hit_list, new_hit, merge_window):
+                for hit in hit_list:
+                    if abs(hit['t'] - new_hit['t']) < merge_window:
+                        # Energy-weighted merge
+                        e_tot = hit['E'] + new_hit['E']
+                        if e_tot > 0:
+                            f_old, f_new = hit['E'] / e_tot, new_hit['E'] / e_tot
+                            hit['x'] = hit['x'] * f_old + new_hit['x'] * f_new
+                            hit['y'] = hit['y'] * f_old + new_hit['y'] * f_new
+                            hit['z'] = hit['z'] * f_old + new_hit['z'] * f_new
+                            hit['truth_t'] = hit['truth_t'] * f_old + new_hit['truth_t'] * f_new
+                            # DO NOT SHIFT TIME during merge, keep original anchor
+                            # hit['t'] = hit['t'] * f_old + new_hit['t'] * f_new
+                        hit['E'] = e_tot
+                        # Bitwise OR for PDGs if multiple particles hit same strip AT EXACT SAME TIME
+                        hit['pdg_mask'] |= new_hit['pdg_mask']
+                        return
+                hit_list.append(new_hit)
+
+            for idx in valid_indices:
+                v_id = int(unique_vols[idx])
+                ax, ay, az, at, se = avg_x[idx], avg_y[idx], avg_z[idx], avg_t[idx], sum_e[idx]
+                pdg_mask = pdg_to_mask(pdg)
+                
+                # ATAR PROCESSING
+                if is_atar_lookup[idx]:
+                    strip_orientation = atarheader.GetChannel(v_id).GetOrientation()
+                    if strip_orientation == 2: strip_orientation = 0
+                    
+                    new_hit = {'x': float(ax), 'y': float(ay), 'z': float(az), 't': max(float(at), 0.05), 'truth_t': max(float(truth_t[idx]), 0.05), 'E': float(se), 'view': int(strip_orientation), 'pdg_mask': pdg_mask}
+                    if v_id not in event_hits_atar: event_hits_atar[v_id] = []
+                    merge_hit(event_hits_atar[v_id], new_hit, merge_window=2.0)
+                    
+                # LYSO CALORIMETER PROCESSING
+                elif is_lyso_lookup[idx]:
+                    new_hit = {'x': float(ax), 'y': float(ay), 'z': float(az), 't': float(at), 'truth_t': float(truth_t[idx]), 'E': float(se), 'pdg_mask': pdg_mask}
+                    if v_id not in event_hits_lyso: event_hits_lyso[v_id] = []
+                    merge_hit(event_hits_lyso[v_id], new_hit, merge_window=10.0)
+
+        # 4. Calorimeter Exclusive Hit Processing (e.g. Gammas)
+        # Uncharged particles often don't leave Geant4 'tracks' but DO deposit in entry.calo
+        for crystal in entry.calo:
+            edep = crystal.GetTotalEnergyDeposit()
+            if edep < 1e-4: continue
+            
+            # Replicate temporal mask cut and explicitly clip for log-scale plotting
+            t = max(crystal.GetTime()[0], 0.05)
+            if t > 10000: continue
+            
+            pdg = crystal.GetPDGID()
+            pdg_mask = pdg_to_mask(pdg)
+            
+            c_id = int(crystal.GetCaloID())
+            xyz = geoheader.GetCentre(c_id)
+            # Use same SCALE_FACTOR (1.19) from old script to map front-face to shower max
+            x, y, z = xyz.X() * 1.19, xyz.Y() * 1.19, xyz.Z() * 1.19
+            
+            new_hit = {'x': float(x), 'y': float(y), 'z': float(z), 't': float(t), 'truth_t': float(t), 'E': float(edep), 'pdg_mask': pdg_mask}
+            
+            if c_id not in event_hits_lyso:
+                event_hits_lyso[c_id] = []
+            merge_hit(event_hits_lyso[c_id], new_hit, merge_window=10.0)
+
+        # 5. Flatten Merged Hits into Event Lists & Calculate Time Slices
+        evt_atar_x, evt_atar_y, evt_atar_z, evt_atar_E, evt_atar_t, evt_atar_truth_t, evt_atar_view, evt_atar_pdg = [], [], [], [], [], [], [], []
+        for v_id, hits in event_hits_atar.items():
+            for h in hits:
+                evt_atar_x.append(h['x'])
+                evt_atar_y.append(h['y'])
+                evt_atar_z.append(h['z'])
+                evt_atar_t.append(h['t'])
+                evt_atar_truth_t.append(h['truth_t'])
+                evt_atar_E.append(h['E'])
+                evt_atar_view.append(h['view'])
+                evt_atar_pdg.append(h['pdg_mask'])
+
+        evt_lyso_x, evt_lyso_y, evt_lyso_z, evt_lyso_E, evt_lyso_t, evt_lyso_pdg = [], [], [], [], [], []
+        for v_id, hits in event_hits_lyso.items():
+            for h in hits:
+                evt_lyso_x.append(h['x'])
+                evt_lyso_y.append(h['y'])
+                evt_lyso_z.append(h['z'])
+                evt_lyso_t.append(h['t'])
+                evt_lyso_E.append(h['E'])
+                evt_lyso_pdg.append(h['pdg_mask'])
+
+        # Algorithm: Highest-Energy Seeded Time Slicing (Global across ATAR and LYSO)
+        evt_atar_slice = [-1] * len(evt_atar_t)
+        evt_lyso_slice = [-1] * len(evt_lyso_t)
+        
+        all_times = np.concatenate([evt_atar_t, evt_lyso_t]) if len(evt_atar_t) + len(evt_lyso_t) > 0 else np.array([])
+        all_energies = np.concatenate([evt_atar_E, evt_lyso_E]) if len(evt_atar_t) + len(evt_lyso_t) > 0 else np.array([])
+        is_lyso = np.concatenate([np.zeros(len(evt_atar_t), dtype=bool), np.ones(len(evt_lyso_t), dtype=bool)]) if len(all_times) > 0 else np.array([])
+        
+        if len(all_times) > 0:
+            unassigned_mask = np.ones(len(all_times), dtype=bool)
+            centers = []
+            
+            # Phase 1: Identify all slice centers (seed times)
+            while np.any(unassigned_mask):
+                valid_idx = np.where(unassigned_mask)[0]
+                max_e_idx = valid_idx[np.argmax(all_energies[valid_idx])]
+                seed_time = all_times[max_e_idx]
+                centers.append(seed_time)
+                
+                # Mark hits within the specific detector windows as assigned
+                # ATAR window: +/- 1.0 ns, LYSO window: +/- 2.0 ns
+                # NOTE: The user requested OR (10ns for LYSO and 2ns for ATAR) in the same volume, 
+                # but since we already merged per-volume using `merge_hit` with 2ns/10ns windows respectively, 
+                # the global slicer should strictly use 1ns/2ns bounds across the whole topology.
+                windows = np.where(is_lyso, 2.0, 1.0)
+                in_window = np.abs(all_times - seed_time) <= windows
+                unassigned_mask[unassigned_mask & in_window] = False
+                
+            # Phase 2: Assign hits to the closest valid center
+            atar_len = len(evt_atar_t)
+            for i in range(len(all_times)):
+                hit_time = all_times[i]
+                hit_is_lyso = is_lyso[i]
+                window = 2.0 if hit_is_lyso else 1.0
+                
+                valid_centers = []
+                for c_idx, c_time in enumerate(centers):
+                    if abs(hit_time - c_time) <= window:
+                        valid_centers.append(c_idx)
+                        
+                if not valid_centers:
+                    slice_id = -1
+                else:
+                    # Dispute resolution: assign to the time slice closer in time
+                    best_center = valid_centers[0]
+                    min_dist = abs(hit_time - centers[best_center])
+                    for c_idx in valid_centers[1:]:
+                        dist = abs(hit_time - centers[c_idx])
+                        if dist < min_dist:
+                            min_dist = dist
+                            best_center = c_idx
+                    slice_id = best_center
+                    
+                if i < atar_len:
+                    evt_atar_slice[i] = slice_id
+                else:
+                    evt_lyso_slice[i - atar_len] = slice_id
+
+        # We append regardless of length to maintain strict 1:1 event indexing
+        out_event_ids.append(i)
+        
+        out_atar_x.append(evt_atar_x)
+        out_atar_y.append(evt_atar_y)
+        out_atar_z.append(evt_atar_z)
+        out_atar_E.append(evt_atar_E)
+        out_atar_t.append(evt_atar_t)
+        out_atar_truth_t.append(evt_atar_truth_t)
+        out_atar_view.append(evt_atar_view)
+        out_atar_pdg.append(evt_atar_pdg)
+        out_atar_slice.append(evt_atar_slice)
+        
+        out_lyso_x.append(evt_lyso_x)
+        out_lyso_y.append(evt_lyso_y)
+        out_lyso_z.append(evt_lyso_z)
+        out_lyso_E.append(evt_lyso_E)
+        out_lyso_t.append(evt_lyso_t)
+        out_lyso_pdg.append(evt_lyso_pdg)
+        out_lyso_slice.append(evt_lyso_slice)
+        
+        out_theta_init.append(float(thetaInit))
+        out_phi_init.append(float(phiInit))
+        out_positron_energy.append(float(positron_initial_energy))
+        
+        for p_key, o_start_x, o_start_y, o_start_z, o_stop_x, o_stop_y, o_stop_z in [
+            (211, out_pion_start_x, out_pion_start_y, out_pion_start_z, out_pion_stop_x, out_pion_stop_y, out_pion_stop_z),
+            (-13, out_muon_start_x, out_muon_start_y, out_muon_start_z, out_muon_stop_x, out_muon_stop_y, out_muon_stop_z),
+            (-11, out_positron_start_x, out_positron_start_y, out_positron_start_z, out_positron_stop_x, out_positron_stop_y, out_positron_stop_z)
+        ]:
+            o_start_x.append(endpoints[p_key]['start'][0])
+            o_start_y.append(endpoints[p_key]['start'][1])
+            o_start_z.append(endpoints[p_key]['start'][2])
+            o_stop_x.append(endpoints[p_key]['stop'][0])
+            o_stop_y.append(endpoints[p_key]['stop'][1])
+            o_stop_z.append(endpoints[p_key]['stop'][2])
+
+    # --- SAVE TO PARQUET ---
+    print("Building PyArrow Table...")
+    table = pa.Table.from_arrays([
+        pa.array(out_event_ids),
+        
+        pa.array(out_theta_init),
+        pa.array(out_phi_init),
+        pa.array(out_positron_energy),
+        pa.array(out_pion_start_x), pa.array(out_pion_start_y), pa.array(out_pion_start_z),
+        pa.array(out_pion_stop_x), pa.array(out_pion_stop_y), pa.array(out_pion_stop_z),
+        pa.array(out_muon_start_x), pa.array(out_muon_start_y), pa.array(out_muon_start_z),
+        pa.array(out_muon_stop_x), pa.array(out_muon_stop_y), pa.array(out_muon_stop_z),
+        pa.array(out_positron_start_x), pa.array(out_positron_start_y), pa.array(out_positron_start_z),
+        pa.array(out_positron_stop_x), pa.array(out_positron_stop_y), pa.array(out_positron_stop_z),
+        
+        pa.array(out_atar_x),
+        pa.array(out_atar_y),
+        pa.array(out_atar_z),
+        pa.array(out_atar_t),
+        pa.array(out_atar_truth_t),
+        pa.array(out_atar_E),
+        pa.array(out_atar_view),
+        pa.array(out_atar_pdg),
+        pa.array(out_atar_slice),
+        
+        pa.array(out_lyso_x),
+        pa.array(out_lyso_y),
+        pa.array(out_lyso_z),
+        pa.array(out_lyso_t),
+        pa.array(out_lyso_E),
+        pa.array(out_lyso_pdg)
+    ], names=[
+        'event_id',
+        'truth_theta', 'truth_phi', 'truth_positron_energy',
+        'truth_pion_start_x', 'truth_pion_start_y', 'truth_pion_start_z',
+        'truth_pion_stop_x', 'truth_pion_stop_y', 'truth_pion_stop_z',
+        'truth_muon_start_x', 'truth_muon_start_y', 'truth_muon_start_z',
+        'truth_muon_stop_x', 'truth_muon_stop_y', 'truth_muon_stop_z',
+        'truth_positron_start_x', 'truth_positron_start_y', 'truth_positron_start_z',
+        'truth_positron_stop_x', 'truth_positron_stop_y', 'truth_positron_stop_z',
+        'atar_x', 'atar_y', 'atar_z', 'atar_t', 'atar_truth_t', 'atar_E', 'atar_view', 'atar_pdg', 'atar_slice_id',
+        'lyso_x', 'lyso_y', 'lyso_z', 'lyso_t', 'lyso_E', 'lyso_pdg'
+    ])
+
+    print(f"Writing to {output_file}...")
+    pq.write_table(table, output_file)
+    print("Done!")
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Convert PIONEER ROOT sim files to flattened Parquet datasets.")
+    parser.add_argument("--input", type=str, required=True, help="Input ROOT file path or directory (glob supported)")
+    parser.add_argument("--output", type=str, required=True, help="Output Parquet file path")
+    parser.add_argument("--max_events", type=int, default=None, help="Max total events to process across all files")
+    parser.add_argument("--max_files", type=int, default=None, help="Max number of ROOT files to process in batch mode")
+    args = parser.parse_args()
+
+    # 1. Resolve Input Files
+    input_path = args.input
+    if os.path.isdir(input_path):
+        input_path = os.path.join(input_path, "*.root")
+    
+    file_list = sorted(glob.glob(input_path))
+    if len(file_list) == 0:
+        print(f"Error: No matching ROOT files found for pattern: {input_path}")
+        sys.exit(1)
+        
+    if args.max_files is not None:
+        print(f"Capping input at {args.max_files} files (Found {len(file_list)})")
+        file_list = file_list[:args.max_files]
+
+    # 2. Load Layout Dependencies from the FIRST file
+    print(f"Extracting headers from {file_list[0]}...")
+    layout_file = ROOT.TFile(file_list[0])
+    geo_header = layout_file.Get("GeoHeader")
+    atar_header = layout_file.Get("AtarHeader")
+    
+    if not geo_header or not atar_header:
+        print("Warning: GeoHeader or AtarHeader missing from first file. Metadata might be incomplete.")
+
+    # 3. Process
+    geo_lookup = None 
+    process_root_file(file_list, geo_header, atar_header, geo_lookup, args.output, max_events=args.max_events)
