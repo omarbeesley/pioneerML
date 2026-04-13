@@ -33,6 +33,7 @@ def extract_hits(row, pdg_mask_keep, origin_val, dt_offset=0.0):
         'view': np.array(row['atar_view'])[keep_atar].tolist(),
         'pdg': atar_pdgs[keep_atar].tolist(),
         'slice_id': np.array(row['atar_slice_id'])[keep_atar].tolist(), # Pre-mix placeholder
+        'slice_mean_t': [0.0] * np.sum(keep_atar), # Placeholder, recomputed after mixing
         'origin': [origin_val] * np.sum(keep_atar)
     }
     
@@ -49,6 +50,8 @@ def extract_hits(row, pdg_mask_keep, origin_val, dt_offset=0.0):
         't': lyso_t_shifted[keep_lyso].tolist(),
         'E': np.array(row['lyso_E'])[keep_lyso].tolist(),
         'pdg': lyso_pdgs[keep_lyso].tolist(),
+        'slice_id': [0] * np.sum(keep_lyso), # Placeholder, recomputed after mixing
+        'slice_mean_t': [0.0] * np.sum(keep_lyso), # Placeholder, recomputed after mixing
         'origin': [origin_val] * np.sum(keep_lyso)
     }
     
@@ -104,6 +107,8 @@ class PileupMixer:
             't': bkg_times.tolist(),
             'E': bkg_energies.tolist(),
             'pdg': [OTHER] * n_hits, # Placeholder PDG (usually beta)
+            'slice_id': [0] * n_hits, # Placeholder, recomputed after mixing
+            'slice_mean_t': [0.0] * n_hits, # Placeholder, recomputed after mixing
             'origin': [-1] * n_hits
         }
         return lyso_dict
@@ -119,7 +124,7 @@ class PileupMixer:
         
         for _ in tqdm(range(num_events), desc=f"Mixing {mode}"):
             # 1. Main Event (with optional window enforcement retry)
-            for attempt in range(5):
+            for attempt in range(8):
                 idx = np.random.randint(len(pool))
                 main_row = pool.iloc[idx]
                 if not enforce_window:
@@ -133,8 +138,8 @@ class PileupMixer:
             out_row = {k: main_row[k] for k in main_row.keys() if k.startswith('truth_')}
             out_row['event_type'] = 0 if mode == 'michel' else 1
             
-            atar_hits = {k: [] for k in ['x', 'y', 'z', 't', 'truth_t', 'E', 'view', 'pdg', 'slice_id', 'origin']}
-            lyso_hits = {k: [] for k in ['x', 'y', 'z', 't', 'E', 'pdg', 'origin']}
+            atar_hits = {k: [] for k in ['x', 'y', 'z', 't', 'truth_t', 'E', 'view', 'pdg', 'slice_id', 'slice_mean_t', 'origin']}
+            lyso_hits = {k: [] for k in ['x', 'y', 'z', 't', 'E', 'pdg', 'slice_id', 'slice_mean_t', 'origin']}
             
             a_main, l_main = extract_hits(main_row, 0xFFFFFFFF, origin_val=0, dt_offset=0.0)
             
@@ -237,40 +242,84 @@ class PileupMixer:
             if radio_hits:
                 merge_extracted(lyso_hits, radio_hits)
                 
-            # Re-calculate absolute Time-Slice IDs across ALL mixed backgrounds
+            # Re-calculate Time-Slice IDs independently per detector
             all_atar_t = np.array(atar_hits['t'])
             all_lyso_t = np.array(lyso_hits['t'])
             all_atar_E = np.array(atar_hits['E'])
             all_lyso_E = np.array(lyso_hits['E'])
             
-            all_times = np.concatenate([all_atar_t, all_lyso_t]) if len(all_atar_t) + len(all_lyso_t) > 0 else np.array([])
-            all_energies = np.concatenate([all_atar_E, all_lyso_E]) if len(all_atar_t) + len(all_lyso_t) > 0 else np.array([])
-            is_lyso = np.concatenate([np.zeros(len(all_atar_t), dtype=bool), np.ones(len(all_lyso_t), dtype=bool)]) if len(all_times) > 0 else np.array([])
-            
-            final_atar_slices = np.zeros(len(all_atar_t), dtype=int)
-            final_lyso_slices = np.zeros(len(all_lyso_t), dtype=int)
-            
-            if len(all_times) > 0:
-                sort_idx = np.argsort(all_times)
-                sorted_t = all_times[sort_idx]
+            def energy_weighted_slicing(times, energies, gap_threshold):
+                """
+                Clusters hits using an energy-weighted sliding mean.
+                A new cluster starts when a hit's time exceeds the current
+                cluster's energy-weighted mean time by more than gap_threshold.
+                """
+                n = len(times)
+                if n == 0:
+                    return np.zeros(0, dtype=int)
                 
-                # Single-linkage clustering: split slices if the physical gap between consecutive hits is > 2.0 ns
-                gaps = np.diff(sorted_t)
-                split_indices = np.where(gaps > 2.0)[0] + 1
+                slices = np.zeros(n, dtype=int)
+                sort_idx = np.argsort(times)
                 
-                current_slice_id = 1
-                for i in range(len(sort_idx)):
-                    if i in split_indices:
-                        current_slice_id += 1
-                        
-                    orig_idx = sort_idx[i]
-                    if orig_idx < len(all_atar_t):
-                        final_atar_slices[orig_idx] = current_slice_id
+                current_slice = 1
+                sum_Et = times[sort_idx[0]] * energies[sort_idx[0]]
+                sum_E = energies[sort_idx[0]]
+                slices[sort_idx[0]] = current_slice
+                
+                for i in range(1, n):
+                    idx = sort_idx[i]
+                    t_i = times[idx]
+                    E_i = energies[idx]
+                    
+                    weighted_mean = sum_Et / max(sum_E, 1e-9)
+                    gap = t_i - weighted_mean
+                    
+                    if gap > gap_threshold:
+                        # Start new cluster
+                        current_slice += 1
+                        sum_Et = t_i * E_i
+                        sum_E = E_i
                     else:
-                        final_lyso_slices[orig_idx - len(all_atar_t)] = current_slice_id
+                        # Extend current cluster
+                        sum_Et += t_i * E_i
+                        sum_E += E_i
+                    
+                    slices[idx] = current_slice
+                
+                return slices
+            
+            # ATAR: 1.0 ns gap from energy-weighted mean (200 ps resolution)
+            final_atar_slices = energy_weighted_slicing(all_atar_t, all_atar_E, gap_threshold=1.0)
+            
+            # LYSO: 5.0 ns gap from energy-weighted mean (worse calorimeter timing)
+            final_lyso_slices = energy_weighted_slicing(all_lyso_t, all_lyso_E, gap_threshold=5.0)
+            
+            def compute_slice_mean_t(times, energies, slices):
+                """Compute energy-weighted mean time per slice, broadcast back to per-hit."""
+                n = len(times)
+                if n == 0:
+                    return np.zeros(0)
+                mean_t = np.zeros(n)
+                for sid in np.unique(slices):
+                    if sid == 0: continue
+                    mask = (slices == sid)
+                    E_slice = energies[mask]
+                    t_slice = times[mask]
+                    total_E = E_slice.sum()
+                    if total_E > 0:
+                        wt = np.sum(t_slice * E_slice) / total_E
+                    else:
+                        wt = t_slice.mean()
+                    mean_t[mask] = wt
+                return mean_t
+            
+            atar_slice_mean_t = compute_slice_mean_t(all_atar_t, all_atar_E, final_atar_slices)
+            lyso_slice_mean_t = compute_slice_mean_t(all_lyso_t, all_lyso_E, final_lyso_slices)
             
             atar_hits['slice_id'] = final_atar_slices.tolist()
+            atar_hits['slice_mean_t'] = atar_slice_mean_t.tolist()
             lyso_hits['slice_id'] = final_lyso_slices.tolist()
+            lyso_hits['slice_mean_t'] = lyso_slice_mean_t.tolist()
             
             # Identify rare overlaps where multiple MC events fall in same ATAR temporal group
             multi_origin_slice = 0
