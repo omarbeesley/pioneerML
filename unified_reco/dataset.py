@@ -10,13 +10,10 @@ MODALITY_ATAR_YZ = 1
 MODALITY_LYSO = 2
 
 # Normalization constants (borrowed from calorimeter_clustering.py and upstream pipelines)
-NORM_POS_LYSO = 100.0  # mm
-NORM_E_LYSO = 70.0     # MeV
-NORM_T_LYSO = 500.0     # ns
-
-NORM_POS_ATAR = 10.0  # mm
-NORM_E_ATAR = 1.0      # ATAR Energy norm (usually dE/dx or MeV)
-NORM_T_ATAR = 500.0     # ATAR Time norm
+from unified_reco.constants import (
+    NORM_POS_LYSO, NORM_E_LYSO, NORM_T_LYSO,
+    NORM_POS_ATAR, NORM_E_ATAR, NORM_T_ATAR,
+)
 
 def build_purity_data(
     atar_records: List[Any], 
@@ -62,9 +59,13 @@ def build_purity_data(
             for i in range(n_hits):
                 is_yz = (v[i] == 1.0)
                 # If YZ view, X=0, Y=coord. If XZ view, X=coord, Y=0.
-                x_val = 0.0 if is_yz else (c[i] / NORM_POS_ATAR)
-                y_val = (c[i] / NORM_POS_ATAR) if is_yz else 0.0
-                z_val = z[i] / NORM_POS_ATAR
+                # [COMMENTED OUT: ATAR position normalization — testing raw mm coordinates]
+                # x_val = 0.0 if is_yz else (c[i] / NORM_POS_ATAR)
+                # y_val = (c[i] / NORM_POS_ATAR) if is_yz else 0.0
+                # z_val = z[i] / NORM_POS_ATAR
+                x_val = 0.0 if is_yz else float(c[i])
+                y_val = float(c[i]) if is_yz else 0.0
+                z_val = float(z[i])
                 e_val = e[i] / NORM_E_ATAR
                 t_val = 0.0 # Standard ATAR records aggregate over time, explicit hit dt is usually 0
                 mod_val = MODALITY_ATAR_YZ if is_yz else MODALITY_ATAR_XZ
@@ -128,7 +129,8 @@ def build_purity_data(
         data.atar_slice_pdg_target = torch.tensor(atar_slice_pdgs, dtype=torch.long)
         
         pstops = torch.tensor(atar_pion_stops, dtype=torch.float)
-        pstops /= NORM_POS_ATAR  # Normalize ground truth spatial coordinates!
+        # [COMMENTED OUT: pion stop normalization — testing raw mm coordinates]
+        # pstops /= NORM_POS_ATAR
         data.atar_pion_stop_target = pstops
         
         data.atar_angle_target = torch.tensor(atar_angles, dtype=torch.float) # Unit vectors, no norm needed
@@ -181,9 +183,11 @@ class PURITYDataset(Dataset):
         
         hit_list = []
         slice_indices = []
+        slice_mean_times = []
         
         atar_pdg = row.get('atar_pdg', np.zeros(n_atar))
         atar_slice = row.get('atar_slice', np.zeros(n_atar))
+        atar_slice_mean_t = row.get('atar_slice_mean_t', np.zeros(n_atar))
         
         # Process ATAR hits
         for i in range(n_atar):
@@ -201,8 +205,10 @@ class PURITYDataset(Dataset):
             
             hit_list.append([x_val, y_val, z_val, e_val, t_val, float(is_xz), float(is_yz), is_lyso])
             slice_indices.append(atar_slice[i] if atar_slice is not None else 0)
+            slice_mean_times.append(atar_slice_mean_t[i])
             
         lyso_slice = row.get('lyso_slice', np.zeros(n_lyso))
+        lyso_slice_mean_t = row.get('lyso_slice_mean_t', np.zeros(n_lyso))
         # Process LYSO hits
         for i in range(n_lyso):
             x_val = lyso_x[i] / NORM_POS_LYSO
@@ -218,13 +224,15 @@ class PURITYDataset(Dataset):
             
             hit_list.append([x_val, y_val, z_val, e_val, t_val, is_xz, is_yz, is_lyso])
             slice_indices.append(lyso_slice[i] if lyso_slice is not None else 0)
+            slice_mean_times.append(lyso_slice_mean_t[i])
             
         if len(hit_list) == 0:
             return Data()
             
         x_tensor = torch.tensor(hit_list, dtype=torch.float)
         slice_tensor = torch.tensor(slice_indices, dtype=torch.float).unsqueeze(1)
-        x_tensor = torch.cat([x_tensor, slice_tensor], dim=1)
+        slice_mean_t_tensor = torch.tensor(slice_mean_times, dtype=torch.float).unsqueeze(1)
+        x_tensor = torch.cat([x_tensor, slice_tensor, slice_mean_t_tensor], dim=1)  # [N, 10]: col 8=slice_id, col 9=slice_mean_t (ns)
         
         data = Data(x=x_tensor)
         
@@ -260,6 +268,7 @@ class PURITYDataset(Dataset):
             unique_atar_slices, slice_inverse = np.unique(atar_slice, return_inverse=True)
             slice_targets = []
             multi_event_targets = []
+            slice_trigger_targets = []
             s_starts = []
             s_stops = []
             
@@ -278,7 +287,11 @@ class PURITYDataset(Dataset):
                     if np.any(s_origins != s_origins[0]):
                         is_multi = 1.0
                 multi_event_targets.append(is_multi)
-                
+
+                # Per-slice trigger flag: 1 if slice contains ANY trigger-origin hits
+                has_trigger = float(np.any(s_origins == 0))
+                slice_trigger_targets.append(has_trigger)
+
                 # 2. Identify refined hits for slice-level targets (EXACT logic)
                 s_trigger_mask = is_trigger_all[s_mask_local]
                 
@@ -344,6 +357,7 @@ class PURITYDataset(Dataset):
                 
             data.atar_slice_pdg_target = torch.stack(slice_targets) if len(slice_targets) > 0 else torch.zeros((0, 3), dtype=torch.float)
             data.atar_slice_multi_target = torch.tensor(multi_event_targets, dtype=torch.float)
+            data.atar_slice_trigger_target = torch.tensor(slice_trigger_targets, dtype=torch.float)
             data.atar_slice_start_target = torch.tensor(s_starts, dtype=torch.float) if len(s_starts) > 0 else torch.zeros((0, 3), dtype=torch.float)
             data.atar_slice_stop_target = torch.tensor(s_stops, dtype=torch.float) if len(s_stops) > 0 else torch.zeros((0, 3), dtype=torch.float)
             
@@ -360,6 +374,7 @@ class PURITYDataset(Dataset):
             data.atar_node_pdg_target = torch.zeros((0, 3), dtype=torch.float)
             data.atar_slice_pdg_target = torch.zeros((0, 3), dtype=torch.float)
             data.atar_slice_multi_target = torch.zeros(0, dtype=torch.float)
+            data.atar_slice_trigger_target = torch.zeros(0, dtype=torch.float)
             data.atar_slice_start_target = torch.zeros((0, 3), dtype=torch.float)
             data.atar_true_event_id = torch.zeros(0, dtype=torch.long)  # Always present
             data.atar_slice_stop_target = torch.zeros((0, 3), dtype=torch.float)
@@ -369,7 +384,7 @@ class PURITYDataset(Dataset):
         pion_x = row.get('truth_pion_stop_x', 0.0)
         pion_y = row.get('truth_pion_stop_y', 0.0)
         pion_z = row.get('truth_pion_stop_z', 0.0)
-        pstops = torch.tensor([pion_x, pion_y, pion_z], dtype=torch.float) / NORM_POS_ATAR
+        pstops = torch.tensor([pion_x, pion_y, pion_z], dtype=torch.float) / NORM_POS_ATAR  # Normalized to match ATAR hit positions
         data.atar_pion_stop_target = pstops.unsqueeze(0).repeat(num_slices if n_atar > 0 else 0, 1)
             
         data.positron_initial_energy_target = torch.tensor([row.get('truth_positron_energy', 0.0)], dtype=torch.float)
@@ -422,5 +437,14 @@ class PURITYDataset(Dataset):
         is_trigger_all = np.concatenate([atar_is_trigger, lyso_is_trigger])
         data.is_trigger_target = torch.tensor(is_trigger_all, dtype=torch.float)
         #data.is_trigger_target = torch.tensor(atar_is_trigger, dtype=torch.float)
-            
+
+        # Flag: does this event have visible trigger-positron hits in the ATAR?
+        POSITRON_BIT = 4  # 0b000100
+        if n_atar > 0:
+            is_trigger = (np.array(atar_origin) == 0)
+            is_positron = (np.array(atar_pdg, dtype=int) & POSITRON_BIT) > 0
+            data.has_trigger_positron = torch.tensor(float(np.any(is_trigger & is_positron)))
+        else:
+            data.has_trigger_positron = torch.tensor(0.0)
+
         return data
