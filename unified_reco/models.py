@@ -10,7 +10,7 @@ from torch_geometric.utils import to_dense_batch
 from torch_geometric.nn import global_max_pool, global_add_pool, AttentionalAggregation
 
 from unified_reco.constants import (
-    NORM_T_LYSO, NORM_E_LYSO, NORM_POS_ATAR,
+    NORM_T_LYSO, NORM_E_LYSO, NORM_E_ATAR, NORM_POS_ATAR,
     SIGMA_COINC_NS, TOF_NS,
     ACCEPT_Z_MIN_MM, ACCEPT_Z_MAX_MM, ACCEPT_XY_MAX_MM, ACCEPT_ANGLE_MAX_DEG,
 )
@@ -25,33 +25,44 @@ MODALITY_LYSO = 2
 
 def physics_edge_index_batch(x, batch):
     """
-    Creates a sparse graph with true time-slice fully connected subgraphs 
-    and spatial bridging (radius graph) for ATAR hits in Z.
-    Does NOT connect ATAR to LYSO.
+    Fully-connected intra-slice edges per subsystem.
+
+    radius_graph (via torch_cluster's `radius` op) silently requires the
+    `batch` argument to be non-decreasing. The natural input order
+    (ATAR slices 1..N then LYSO slices 1..M) makes a cluster_id of the
+    form  batch*10000 + slice*10 + subsys  jump DOWN at the subsystem
+    boundary (e.g. ...40, 11, 21, ...), and the op responds by silently
+    producing phantom cross-cluster edges AND dropping legitimate
+    intra-cluster ones. Calling the op once per subsystem with the
+    per-call batch explicitly sorted satisfies the invariant by
+    construction and structurally guarantees ATAR-LYSO disjoint graphs.
     """
     is_atar = (x[:, 5] > 0.5) | (x[:, 6] > 0.5)
     is_lyso = (x[:, 7] > 0.5)
     slice_id = x[:, 8]
-    
-    # 1. Temporal Graph: Fully connected intra-slice
-    # Give ATAR and LYSO separate clustering spaces so they don't connect.
-    subsys_id = is_lyso.float() # 0 for ATAR, 1 for LYSO
-    # Combine into a unique integer ID per dense cluster
-    cluster_id = batch * 10000 + slice_id * 10 + subsys_id
-    
+
     from torch_geometric.nn import radius_graph
-    dummy_pos = torch.zeros((x.size(0), 1), device=x.device)
-    
-    with torch.no_grad():
-        edge_index_temporal = radius_graph(
-            dummy_pos, 
-            r=1.0, 
-            batch=cluster_id.long(), 
-            loop=False, 
-            max_num_neighbors=3000
-        )
-    
-    return edge_index_temporal
+
+    edges_list = []
+    for sub_mask in (is_atar, is_lyso):
+        if not sub_mask.any():
+            continue
+        idx_global = sub_mask.nonzero(as_tuple=False).squeeze(1)
+        cluster = (batch[idx_global] * 10000 + slice_id[idx_global] * 10).long()
+        order = torch.argsort(cluster)
+        cluster_sorted = cluster[order]
+        idx_global_sorted = idx_global[order]
+        dummy = torch.zeros((idx_global.size(0), 1), device=x.device)
+        with torch.no_grad():
+            edge_local = radius_graph(
+                dummy, r=1.0, batch=cluster_sorted,
+                loop=False, max_num_neighbors=3000,
+            )
+        edges_list.append(idx_global_sorted[edge_local])
+
+    if not edges_list:
+        return torch.zeros((2, 0), dtype=torch.long, device=x.device)
+    return torch.cat(edges_list, dim=1)
 
 class JointAttentionBlock(nn.Module):
     """
@@ -92,14 +103,14 @@ class JointAttentionBlock(nn.Module):
 
 class VectorHead(nn.Module):
     """Predicts a 3D unit vector"""
-    def __init__(self, input_dim, hidden_dim):
+    def __init__(self, input_dim, hidden_dim, dropout=0.0):
         super().__init__()
         self.mlp = nn.Sequential(
             nn.Linear(input_dim, hidden_dim * 2),
             nn.GELU(),
             nn.Linear(hidden_dim * 2, hidden_dim),
             nn.GELU(),
-            nn.Linear(hidden_dim, 3) 
+            nn.Linear(hidden_dim, 3)
         )
     def forward(self, x):
         raw = self.mlp(x)
@@ -114,7 +125,6 @@ class QuantileOutputHead(nn.Module):
         self.coords = coords
         self.num_quantiles = len(quantiles)
         
-        # High-Capacity 3-Layer MLP for Point Regression
         self.projection = nn.Sequential(
             nn.Linear(input_dim, 256),
             nn.GELU(),
@@ -274,8 +284,8 @@ class PURITYHybridModel(nn.Module):
         # is injected at the final layer so it isn't swamped by the high-dim pooled vector.
         _pdg_hidden = hidden_dim
         self.atar_slice_pdg_body = nn.Sequential(
-            nn.Linear(jk_dim, _pdg_hidden), nn.GELU(),
-            nn.Linear(_pdg_hidden, _pdg_hidden // 2), nn.GELU(),
+            nn.Linear(jk_dim, _pdg_hidden), nn.GELU(), nn.Dropout(0.05),
+            nn.Linear(_pdg_hidden, _pdg_hidden // 2), nn.GELU(), nn.Dropout(0.05),
         )
         self.atar_slice_pdg_norm = nn.LayerNorm(_pdg_hidden // 2 + 1)
         self.atar_slice_pdg_final = nn.Linear(_pdg_hidden // 2 + 1, num_pdg_classes)
@@ -309,8 +319,8 @@ class PURITYHybridModel(nn.Module):
         # 3. Splitter (Node PDG) - Input: Node JK
         # Body compresses per-hit jk representation; total slice energy injected at final layer.
         self.atar_pdg_body = nn.Sequential(
-            nn.Linear(jk_dim, _pdg_hidden), nn.GELU(),
-            nn.Linear(_pdg_hidden, _pdg_hidden // 2), nn.GELU(),
+            nn.Linear(jk_dim, _pdg_hidden), nn.GELU(), nn.Dropout(0.05),
+            nn.Linear(_pdg_hidden, _pdg_hidden // 2), nn.GELU(), nn.Dropout(0.05),
         )
         self.atar_pdg_norm = nn.LayerNorm(_pdg_hidden // 2 + 1)
         self.atar_pdg_final = nn.Linear(_pdg_hidden // 2 + 1, 3)
@@ -319,9 +329,18 @@ class PURITYHybridModel(nn.Module):
         D_A = 256
         self.D_A = D_A  # stored so forward pass can reference it without redefining
 
-        # ATAR Kinematics MLP: [Endpoints (2 points * 3 coords * 3 quantiles = 18) + Slice PDG (3) = 21] -> 64
-        self.atar_kinematics_mlp = nn.Sequential(
-            nn.Linear(21, 64),
+        # Per-view ATAR Kinematics MLPs
+        # Each view pools its own hit information with its own kinematic info:
+        #   XZ: x-endpoint + z-endpoint (+ shared slice PDG), 12 + 3 = 15 -> 64
+        #   YZ: y-endpoint + z-endpoint (+ shared slice PDG), 12 + 3 = 15 -> 64
+        # Z is stereo so it appears in both views; PDG is slice-level and shared.
+        self.atar_kinematics_mlp_xz = nn.Sequential(
+            nn.Linear(12 + 3, 64),
+            nn.GELU(),
+            nn.Linear(64, 64)
+        )
+        self.atar_kinematics_mlp_yz = nn.Sequential(
+            nn.Linear(12 + 3, 64),
             nn.GELU(),
             nn.Linear(64, 64)
         )
@@ -330,22 +349,43 @@ class PURITYHybridModel(nn.Module):
         self.pool_x_event_proj = nn.Sequential(nn.Linear(jk_dim, 128), nn.GELU())
         self.pool_y_event_proj = nn.Sequential(nn.Linear(jk_dim, 128), nn.GELU())
 
-        # Learned time projection: 1D scalar -> 4D
-        self.atar_time_proj = nn.Sequential(
-            nn.Linear(1, 4),
+        # Per-view ATAR Event MLPs: fuse view-specific pool + view-specific kinematics
+        # within each view, producing a D_A//2 half-token per view. The full slice token is
+        # [token_xz || token_yz] so that downstream self-attention sees both pools of both
+        # slices simultaneously when comparing pairs.
+        # No time feature: absolute slice time and anchor-relative slice ordering are
+        # both omitted to keep the role-head time-blind. False positives on out-of-window
+        # pimu events should then be flat in time, preserving the assumption used in the
+        # late-tail background subtraction.
+        _D_HALF = D_A // 2
+        self.atar_event_mlp_xz = nn.Sequential(
+            nn.Linear(128 + 64, _D_HALF),
             nn.GELU(),
+            nn.Linear(_D_HALF, _D_HALF)
+        )
+        self.atar_event_mlp_yz = nn.Sequential(
+            nn.Linear(128 + 64, _D_HALF),
+            nn.GELU(),
+            nn.Linear(_D_HALF, _D_HALF)
         )
 
-        # ATAR Event MLP: [Proj Pool X (128) + Proj Pool Y (128) + Kinematics (64) + Time (4)] -> D_A
-        self.atar_event_mlp = nn.Sequential(
-            nn.Linear(128 * 2 + 64 + 4, D_A),
-            nn.GELU(),
-            nn.Linear(D_A, D_A)
-        )
+        # Anchor flag embedding: 2 entries (not-anchor / anchor) × D_A added to slice
+        # tokens. Matches the standard additive positional-encoding pattern used
+        # elsewhere. Carries NO ordering information — only "is the triggering pion
+        # slice or not." Required because the transformer otherwise treats all
+        # slices symmetrically once time-feat and position-embedding are gone.
+        self.anchor_flag_embedding = nn.Embedding(2, D_A)
 
-        # Temporal Positional Encoding for ATAR Slices (max 64 slice positions)
-        # Used in Phase 9 ATAR event token construction (not part of event builder)
-        self.slice_position_embedding = nn.Embedding(64, D_A)
+        # Dead-material energy regression head (small MLP, detached inputs).
+        # 8 inputs: cos θ pos, cos φ pos, cos θ exit, cos φ exit, total
+        # positron-tagged energy normalized by NORM_E_LYSO, energy-weighted
+        # mean LYSO position (x, y, z) — already normalized by NORM_POS_LYSO.
+        # Output: log(1 + dead_E_pred) in MeV.
+        self.dead_energy_head = nn.Sequential(
+            nn.Linear(8, 32), nn.GELU(),
+            nn.Linear(32, 32), nn.GELU(),
+            nn.Linear(32, 1),
+        )
 
         # --- Slim Event Builder (D_EVENT=32) ---
         # Each LYSO cluster token is built from 12 raw physics features
@@ -406,24 +446,88 @@ class PURITYHybridModel(nn.Module):
         self.pool_y_event = make_pool()
 
         # --- Phase 9: ATAR-Only Event Building ---
-        self.atar_event_self_attn = nn.MultiheadAttention(D_A, num_heads=4, batch_first=True, dropout=dropout)
-        self.atar_event_self_attn_norm = nn.LayerNorm(D_A)
-        self.atar_trigger_classifier = nn.Sequential(
-            nn.Linear(D_A, D_A // 2), nn.GELU(), nn.Linear(D_A // 2, 1)
+        # Stacked self-attention for multi-hop chain reasoning across slices.
+        # Two layers cover the longest real chain (π→μ→e → 2 hops from
+        # positron back to pion); JK concatenation of the pre-attention
+        # input plus each layer's output lets the classifier pick its own
+        # effective depth per slice.
+        self.L_TRIG = 2
+        self.atar_event_layers = nn.ModuleList([
+            nn.TransformerEncoderLayer(
+                d_model=D_A, nhead=4, dim_feedforward=2 * D_A,
+                dropout=dropout, batch_first=True, norm_first=True,
+            )
+            for _ in range(self.L_TRIG)
+        ])
+        # Role-based attachment head.
+        # Input per slice: [ self_token | anchor_token | self - anchor | Δendpoint (6) ]
+        # Output: 3-class logits over {none, muon-in-chain, positron-in-chain}.
+        # The triggering pion itself is the anchor; it is not predicted by this head.
+        JK_DIM = (self.L_TRIG + 1) * D_A
+        ROLE_IN = 3 * JK_DIM + 6
+        self.atar_role_head = nn.Sequential(
+            nn.Linear(ROLE_IN, D_A), nn.GELU(), nn.Dropout(0.05),
+            nn.Linear(D_A, D_A // 2), nn.GELU(), nn.Dropout(0.05),
+            nn.Linear(D_A // 2, 3),
         )
 
-        # --- Phase 10: Pion Stop (per-graph, soft-gated) ---
-        self.pool_all_pion = make_pool()
-        self.pion_stop_head = nn.Sequential(
-            nn.Linear(jk_dim, hidden_dim), nn.GELU(),
+        # Per-axis scale for the endpoint-compatibility kernel that biases
+        # cross-slice attention. Raw parameter is passed through softplus to
+        # keep the axis weights positive; init at -2 so softplus(-2) ≈ 0.13
+        # starts the bias weak, letting training adjust its magnitude.
+        self.kernel_alpha = nn.Parameter(torch.full((3,), -2.0))
+
+        # --- Phase 10: Pion Stop (stereo softmax pooling + per-axis residual) ---
+        # Mirrors the endpoint head's structure: view-specific residuals for
+        # the transverse coords (x sees x-branch only, y sees y-branch only)
+        # and a stereo residual for z (sees both branches).
+        # Score factorization per hit:
+        #   log-score = logit_trig (detached) + logit_pion (detached) + logit_endpoint
+        # Trigger + pion act as a soft gate (confidently non-pion hits get
+        # large-negative log-odds → softmax ignores them). The endpoint
+        # scorer is the only learnable path from pion_stop loss to the
+        # softmax weights, so it specializes in "which pion hit is the stop?".
+        self.pion_endpoint_scorer = nn.Sequential(
+            nn.Linear(jk_dim, hidden_dim // 2), nn.GELU(),
+            nn.Linear(hidden_dim // 2, hidden_dim // 4), nn.GELU(),
+            nn.Linear(hidden_dim // 4, 1),
+        )
+        self.pion_pool_log_tau = nn.Parameter(torch.tensor(0.0))
+        # Bounded residuals: one MLP per coordinate.
+        self.pion_stop_residual_x = nn.Sequential(
+            nn.Linear(1 + jk_dim, hidden_dim // 2), nn.GELU(),
+            nn.Linear(hidden_dim // 2, hidden_dim // 4), nn.GELU(),
+            nn.Linear(hidden_dim // 4, 1),
+        )
+        self.pion_stop_residual_y = nn.Sequential(
+            nn.Linear(1 + jk_dim, hidden_dim // 2), nn.GELU(),
+            nn.Linear(hidden_dim // 2, hidden_dim // 4), nn.GELU(),
+            nn.Linear(hidden_dim // 4, 1),
+        )
+        self.pion_stop_residual_z = nn.Sequential(
+            nn.Linear(1 + 2 * jk_dim, hidden_dim), nn.GELU(),
             nn.Linear(hidden_dim, hidden_dim // 2), nn.GELU(),
-            nn.Linear(hidden_dim // 2, 3)
+            nn.Linear(hidden_dim // 2, 1),
         )
+        # Per-axis scale on the tanh residual (same units as x[:, 0:3]).
+        self.pion_stop_residual_scale = nn.Parameter(torch.tensor([0.1, 0.1, 0.1]))
 
-        # --- Phase 11: Positron Direction ---
-        self.pool_all_mip = make_pool()
-        # Input: MIP-pooled features (jk_dim) + pion_stop (3) + exit_dir (3)
-        self.positron_dir_head = VectorHead(jk_dim + 6, hidden_dim)
+        # --- Phase 11: Positron Direction (stereo pools, joint head) ---
+        # Hard-gated positron hits are mean-pooled per view (x-strip vs y-strip).
+        # Both pools + detached pion stop feed one VectorHead that emits the
+        # full (dx, dy, dz) jointly, then F.normalize. Stereo separation avoids
+        # view-feature pollution; joint output ensures the three components
+        # are coherent as a unit vector.
+        self.positron_dir_head = VectorHead(2 * jk_dim + 3, hidden_dim)
+
+        # --- Phase 11b: has-trigger-positron ---
+        # Replaced by a pure decision rule in forward(): any slice with >=2
+        # qualifying (trigger>0.5 AND mip>0.5) hits. Learned head disabled.
+        # self.has_trigger_positron_head = nn.Sequential(
+        #     nn.Linear(4 + 3, 32), nn.GELU(),
+        #     nn.Linear(32, 16), nn.GELU(),
+        #     nn.Linear(16, 1),
+        # )
 
         # --- Phase 14: Attention bias parameters (used in slim event builder) ---
         # Per-token temporal σ. ATAR is always a MIP → single constant contribution.
@@ -452,27 +556,28 @@ class PURITYHybridModel(nn.Module):
         # --- LYSO Specific Heads (Object Condensation) ---
         # Node Level
         self.lyso_beta_head = nn.Sequential(
-            nn.Linear(jk_dim, 32),
-            nn.ReLU(),
-            nn.Linear(32, 1),
-            nn.Sigmoid()
+            nn.Linear(jk_dim, 32), nn.ReLU(),
+            nn.Linear(32, 1), nn.Sigmoid()
         )
         self.lyso_cluster_coord_head = nn.Sequential(
-            nn.Linear(jk_dim, 32),
-            nn.ReLU(),
-            nn.Linear(32, 3) 
+            nn.Linear(jk_dim, 32), nn.ReLU(),
+            nn.Linear(32, 3)
         )
         self.lyso_fraction_head = nn.Sequential(
-            nn.Linear(jk_dim, 32),
-            nn.ReLU(),
+            nn.Linear(jk_dim, 32), nn.ReLU(),
             nn.Linear(32, 1),
             nn.Sigmoid()
         )
 
-    def forward(self, x, batch, task_weights=None):
+    def forward(self, x, batch, task_weights=None, triggering_pion_slice=None):
         """
         x: [N_total_hits, 6] (features + modality_idx)
         batch: [N_total_hits] PyG batch index
+        triggering_pion_slice: [B] int tensor giving the LOCAL (within-event, over
+            valid slices in ascending slice-id order) index of the anchor pion
+            slice for each event. -1 means "no anchor" (background event, or
+            pion not visible in ATAR). If None, the anchor is predicted from
+            slice-PDG + slice-time.
         """
         if task_weights is None: task_weights = {}
 
@@ -841,19 +946,18 @@ class PURITYHybridModel(nn.Module):
             output['num_graphs_in_batch'] = num_graphs_in_batch
             output['num_slices_max'] = num_slices_max
             
-            # --- ATAR Event Builder Early Fusion ---
-            # Extract endpoints: [N_slices, 2 (points), 3 (coords), 3 (quantiles)] -> 18 features total
-            # We preserve all quantiles (lower, median, upper) so the Event Builder sees the uncertainty
-            # DETACH kinematics to prevent event builder gradient from destabilizing upstream heads
-            endpoints_all = output['atar_endpoints'].detach()
-            # Flatten to [N_slices, 18]
-            endpoints_flat = endpoints_all.view(endpoints_all.size(0), -1)
+            # --- ATAR Event Builder Early Fusion (stereo) ---
+            # Endpoints: [N_slices, 2 (points), 3 (coords=x,y,z), 3 (quantiles)].
+            # Split into per-view kinematic bundles so that each view's hit pool is fused with
+            # that view's endpoint info (xz pool ↔ x-endpoint + z-endpoint, same for yz).
+            endpoints_all = output['atar_endpoints']
+            # xz and yz each take 2 coords × 2 points × 3 quantiles = 12 features.
+            endpoints_xz_flat = endpoints_all[:, :, [0, 2], :].reshape(endpoints_all.size(0), -1)
+            endpoints_yz_flat = endpoints_all[:, :, [1, 2], :].reshape(endpoints_all.size(0), -1)
+            slice_pdg_det = output['atar_slice_pdg']
 
-            # Combine kinematics: Endpoints + Slice PDG -> [N_slices, 21]
-            atar_kin_input = torch.cat([endpoints_flat, output['atar_slice_pdg'].detach()], dim=1)
-
-            # Pass through ATAR Kinematics MLP
-            atar_kin_feat = self.atar_kinematics_mlp(atar_kin_input)
+            atar_kin_xz = self.atar_kinematics_mlp_xz(torch.cat([endpoints_xz_flat, slice_pdg_det], dim=1))
+            atar_kin_yz = self.atar_kinematics_mlp_yz(torch.cat([endpoints_yz_flat, slice_pdg_det], dim=1))
 
             # Per-slice energy-weighted mean time (col 4 = normalized time)
             hit_times = x[is_atar, 4]
@@ -870,24 +974,52 @@ class PURITYHybridModel(nn.Module):
             proj_x_ev = self.pool_x_event_proj(pool_x_ev[valid_slice_mask])  # [N_valid_slices, 128]
             proj_y_ev = self.pool_y_event_proj(pool_y_ev[valid_slice_mask])  # [N_valid_slices, 128]
 
-            # Learned time projection
-            time_feat = self.atar_time_proj(slice_mean_time.unsqueeze(-1))  # [N_valid_slices, 4]
+            # Per-view slice half-tokens: fuse view-specific pool + view-specific kinematics.
+            # Final slice token is [token_xz || token_yz], so the subsequent self-attention sees
+            # both pools of both slices simultaneously when comparing pairs.
+            # No time/position features here — see __init__ comment for rationale (FP-time flatness).
+            token_xz = self.atar_event_mlp_xz(torch.cat([proj_x_ev, atar_kin_xz], dim=1))
+            token_yz = self.atar_event_mlp_yz(torch.cat([proj_y_ev, atar_kin_yz], dim=1))
+            atar_event_tokens = torch.cat([token_xz, token_yz], dim=1)
 
-            # Concatenate projected stereo pools, kinematics, and time -> ATAR Event Tokens
-            atar_event_input = torch.cat([proj_x_ev, proj_y_ev, atar_kin_feat, time_feat], dim=1)
-            atar_event_tokens = self.atar_event_mlp(atar_event_input)
-            
-            # Add temporal positional encoding based on slice index
+            # Anchor flag: add a learned D_A-vector to slice tokens marking which slice
+            # is the triggering pion. No ordering information — purely "is anchor or not."
             valid_slice_indices = torch.nonzero(valid_slice_mask).squeeze(1)
-            local_slice_ids = (valid_slice_indices % num_slices_max).clamp(max=63)
-            atar_event_tokens = atar_event_tokens + self.slice_position_embedding(local_slice_ids)
+            atar_event_batch_pe = valid_slice_indices // num_slices_max
+            slices_per_event_pe = torch.zeros(num_graphs_in_batch, dtype=torch.long, device=x.device)
+            slices_per_event_pe.index_add_(
+                0, atar_event_batch_pe, torch.ones_like(atar_event_batch_pe, dtype=torch.long)
+            )
+            event_offset_pe = torch.zeros_like(slices_per_event_pe)
+            if num_graphs_in_batch > 1:
+                event_offset_pe[1:] = torch.cumsum(slices_per_event_pe, dim=0)[:-1]
+
+            is_anchor_per_slice = torch.zeros(
+                valid_slice_indices.size(0), dtype=torch.bool, device=x.device
+            )
+            if triggering_pion_slice is not None and valid_slice_indices.numel() > 0:
+                anchor_local = triggering_pion_slice.to(x.device).long().view(-1)
+                anchor_valid = anchor_local >= 0
+                anchor_local_safe = anchor_local.clamp(min=0)
+                slice_budget = (slices_per_event_pe - 1).clamp(min=0)
+                anchor_local_clamped = torch.minimum(anchor_local_safe, slice_budget)
+                anchor_global_idx = (event_offset_pe + anchor_local_clamped).clamp(
+                    max=valid_slice_indices.size(0) - 1
+                )
+                # Only mark events whose anchor index was non-negative.
+                if anchor_valid.any():
+                    is_anchor_per_slice[anchor_global_idx[anchor_valid]] = True
+
+            atar_event_tokens = atar_event_tokens + self.anchor_flag_embedding(
+                is_anchor_per_slice.long()
+            )
 
             output['atar_event_tokens'] = atar_event_tokens
 
             # === PHASE 9: ATAR-Only Event Building ===
             # Self-attention over ATAR event tokens for cross-slice temporal reasoning,
             # then per-token binary trigger classification.
-            if task_weights.get('w_atar_trigger_slice', 0.0) > 0.0 or task_weights.get('w_pion_kinematics', 0.0) > 0.0 or task_weights.get('w_event_builder', 0.0) > 0.0:
+            if task_weights.get('w_atar_trigger_slice', 0.0) > 0.0 or task_weights.get('w_pion_kinematics', 0.0) > 0.0 or task_weights.get('w_event_builder', 0.0) > 0.0 or task_weights.get('w_has_trigger_positron', 0.0) > 0.0:
                 B_atar_idx = valid_slice_mask.nonzero().squeeze(1) // num_slices_max
 
                 sort_idx_atar9 = torch.argsort(B_atar_idx)
@@ -897,80 +1029,295 @@ class PURITYHybridModel(nn.Module):
                 from torch_geometric.utils import to_dense_batch
                 dense_atar9, pad_mask9 = to_dense_batch(sorted_tokens9, sorted_batch9)
 
-                # Pre-LN: normalize BEFORE attention, not after residual.
-                # Post-LN backward divides by (variance+eps)^1.5 which is
-                # unstable when the residual sum has near-uniform features.
-                normed9 = self.atar_event_self_attn_norm(dense_atar9)
-                atar_sa_out, _ = self.atar_event_self_attn(
-                    normed9, normed9, normed9,
-                    key_padding_mask=~pad_mask9
+                # --- Endpoint-compatibility kernel as attention bias ---
+                # For each pair (i, j) of slices in the same event, compute a
+                # Mahalanobis-like Gaussian log-overlap between their endpoints:
+                #     -(μ_i - μ_j)² / (σ_i² + σ_j²)  per axis, weighted per-axis.
+                # Take logsumexp over all 4 (point_i, point_j) combinations so
+                # the kernel is agnostic to which endpoint is entry vs exit.
+                # Kernel is detached from the endpoint regressors — pure physics
+                # prior into the attention logits, no gradient from trigger loss
+                # into upstream kinematics.
+                endpoint_mean = endpoints_all[..., 1]  # [N_valid, 2, 3] median quantile
+                endpoint_sigma = 0.5 * (endpoints_all[..., 2] - endpoints_all[..., 0]).abs().clamp(min=1e-3)
+
+                mean_sorted = endpoint_mean[sort_idx_atar9].reshape(-1, 6)
+                sigma_sorted = endpoint_sigma[sort_idx_atar9].reshape(-1, 6)
+                dense_mean_flat, _ = to_dense_batch(mean_sorted, sorted_batch9)
+                dense_sigma_flat, _ = to_dense_batch(sigma_sorted, sorted_batch9)
+                B_size, N_max = dense_mean_flat.shape[0], dense_mean_flat.shape[1]
+                dense_mean = dense_mean_flat.view(B_size, N_max, 2, 3)
+                dense_sigma = dense_sigma_flat.view(B_size, N_max, 2, 3)
+
+                # Broadcast to [B, N, N, 2(point_i), 2(point_j), 3(axis)]
+                m_i = dense_mean.unsqueeze(2).unsqueeze(4)
+                m_j = dense_mean.unsqueeze(1).unsqueeze(3)
+                s_i = dense_sigma.unsqueeze(2).unsqueeze(4)
+                s_j = dense_sigma.unsqueeze(1).unsqueeze(3)
+                delta_sq = (m_i - m_j) ** 2
+                var_sum = s_i ** 2 + s_j ** 2 + 1e-6
+
+                alpha = F.softplus(self.kernel_alpha).view(1, 1, 1, 1, 1, 3)
+                neg_chi2 = -(delta_sq / var_sum) * alpha
+                g_per_pair = neg_chi2.sum(dim=-1)  # [B, N, N, 2, 2]
+                kernel_bias = torch.logsumexp(g_per_pair.flatten(-2, -1), dim=-1)  # [B, N, N]
+                kernel_bias = kernel_bias.clamp(min=-50.0)  # guard against numerically extreme pairs
+
+                num_heads_sa = self.atar_event_layers[0].self_attn.num_heads
+                kernel_bias_heads = (
+                    kernel_bias.unsqueeze(1)
+                    .expand(-1, num_heads_sa, -1, -1)
+                    .reshape(B_size * num_heads_sa, N_max, N_max)
                 )
-                atar_tokens_refined = dense_atar9 + atar_sa_out
 
-                # Safety net: if attention produced NaN, fall back to input
-                if torch.isnan(atar_tokens_refined).any():
-                    atar_tokens_refined = dense_atar9
+                # Stacked self-attention with pre-LN (inside TransformerEncoderLayer).
+                # Collect each layer's output alongside the pre-attention input so
+                # the classifier can read whichever depth a given slice needs:
+                #   h^(0) = raw slice token               (0 hops — e.g. the pion itself)
+                #   h^(1) = 1-hop chain neighbor info     (e.g. direct-decay positron)
+                #   h^(2) = 2-hop chain neighbor info     (e.g. michel positron via muon)
+                jk_stack = [dense_atar9]
+                h_jk = dense_atar9
+                for layer in self.atar_event_layers:
+                    h_next = layer(h_jk, src_mask=kernel_bias_heads, src_key_padding_mask=~pad_mask9)
+                    # Safety net: if a layer produced NaN, fall back to its input
+                    # rather than propagate garbage forward.
+                    if torch.isnan(h_next).any():
+                        h_next = h_jk
+                    h_jk = h_next
+                    jk_stack.append(h_jk)
 
-                # Flatten back and un-sort
-                refined_flat = atar_tokens_refined[pad_mask9]
+                # JK concat along feature dim → [B, N_max, (L+1) * D_A]
+                atar_tokens_jk = torch.cat(jk_stack, dim=-1)
+
+                # Flatten back and un-sort both the JK concat (for the trigger
+                # classifier) and the last-layer output (for downstream consumers
+                # that still want D_A-dim tokens).
                 inverse_sort9 = torch.argsort(sort_idx_atar9)
-                refined_flat = refined_flat[inverse_sort9]
+                jk_flat = atar_tokens_jk[pad_mask9][inverse_sort9]
+                last_flat = jk_stack[-1][pad_mask9][inverse_sort9]
 
-                # Trigger classification per slice token
-                atar_trigger_logits = self.atar_trigger_classifier(refined_flat).squeeze(-1)
+                # --- Role-based attachment head ---
+                # Per valid slice, classify role in the triggering chain:
+                #   0 = none, 1 = muon-in-chain, 2 = positron-in-chain.
+                # The anchor pion slice is fixed (not predicted) — its role output
+                # is ignored by the loss and its in-chain prob is clamped to 1.
+                B_size_evt = num_graphs_in_batch
+                N_valid = jk_flat.size(0)
+
+                # Event id per valid slice (in jk_flat order).
+                slice_event_idx = B_atar_idx  # [N_valid]
+
+                # Count valid slices per event and derive cumulative offsets so we
+                # can resolve each event's anchor into its global jk_flat index.
+                slices_per_event = torch.zeros(B_size_evt, dtype=torch.long, device=x.device)
+                slices_per_event.index_add_(
+                    0, slice_event_idx,
+                    torch.ones_like(slice_event_idx, dtype=torch.long),
+                )
+                event_offset = torch.zeros_like(slices_per_event)
+                if B_size_evt > 1:
+                    event_offset[1:] = torch.cumsum(slices_per_event, dim=0)[:-1]
+
+                # Resolve the per-event anchor. Training: read from batch; Eval /
+                # no-truth: fall back to the earliest pion-class slice in the event.
+                if triggering_pion_slice is not None:
+                    anchor_local = triggering_pion_slice.to(device=x.device, dtype=torch.long)
+                else:
+                    # Predicted anchor: per event, pick the pion-class valid slice
+                    # (argmax over the 3-class slice_pdg head) with the smallest
+                    # slice mean time. slice_pdg_det here is the per-slice PDG
+                    # soft prediction, shape [N_valid, 3].
+                    # slice_pdg_det holds LOGITS (sigmoid not yet applied), so
+                    # threshold > 0 is equivalent to sigmoid > 0.5.
+                    pion_score = slice_pdg_det[:, 0]  # [N_valid]
+                    is_pion_pred = (pion_score > 0.0)
+                    t_mask = torch.where(
+                        is_pion_pred, slice_mean_time, torch.full_like(slice_mean_time, 1e9)
+                    )
+                    # Per-event argmin over time_masked. Use scatter_min.
+                    anchor_local = torch.full((B_size_evt,), -1, dtype=torch.long, device=x.device)
+                    best_time = torch.full((B_size_evt,), 1e9, device=x.device)
+                    # Simple per-event sequential resolution via index_reduce-style.
+                    # Valid slices are in event-sorted order already (B_atar_idx
+                    # is sorted thanks to sort_idx_atar9 semantics) — use a loop
+                    # over events if batch is small; else fall back to a scatter.
+                    # Vectorised argmin per event:
+                    sort_t_perm = torch.argsort(t_mask, stable=True)
+                    ev_sorted = slice_event_idx[sort_t_perm]
+                    # First occurrence of each event id in ev_sorted has smallest t.
+                    seen = torch.zeros(B_size_evt, dtype=torch.bool, device=x.device)
+                    for pos, ev in zip(sort_t_perm.tolist(), ev_sorted.tolist()):
+                        if not seen[ev] and t_mask[pos] < 5e8:
+                            # Local idx = global pos - event_offset[ev]
+                            anchor_local[ev] = pos - int(event_offset[ev].item())
+                            seen[ev] = True
+
+                anchor_valid = anchor_local >= 0  # [B]
+                # Clamp to 0 so indexing into jk_flat is always in-bounds; we
+                # mask the result below for events where anchor_valid=False.
+                anchor_local_safe = anchor_local.clamp(min=0)
+                anchor_global_in_jk = event_offset + anchor_local_safe  # [B]
+                anchor_global_in_jk = anchor_global_in_jk.clamp(max=N_valid - 1)
+
+                # Anchor token per event, broadcast to per-slice.
+                anchor_token_per_event = jk_flat[anchor_global_in_jk]  # [B, JK_DIM]
+                # Zero out anchor token for events with no valid anchor — self-anchor
+                # dynamics still work (self - 0 = self) and the head can learn to
+                # behave gracefully on background events.
+                anchor_token_per_event = anchor_token_per_event * anchor_valid.float().unsqueeze(-1)
+                anchor_token_per_slice = anchor_token_per_event[slice_event_idx]  # [N_valid, JK_DIM]
+
+                # Relative endpoint feature: flattened Δendpoint to anchor (6 dims).
+                endpoint_mean_flat = endpoint_mean.reshape(N_valid, 6)  # median quantile endpoints
+                endpoint_anchor_per_event = endpoint_mean_flat[anchor_global_in_jk]
+                endpoint_anchor_per_event = endpoint_anchor_per_event * anchor_valid.float().unsqueeze(-1)
+                endpoint_delta = endpoint_mean_flat - endpoint_anchor_per_event[slice_event_idx]
+
+                role_input = torch.cat([
+                    jk_flat,
+                    anchor_token_per_slice,
+                    jk_flat - anchor_token_per_slice,
+                    endpoint_delta,
+                ], dim=-1)
+                role_logits = self.atar_role_head(role_input)  # [N_valid, 3]
+
+                # In-chain logit: log p(role ∈ {μ, e}) / p(none) = logsumexp(l_μ, l_e) - l_none.
+                in_chain_logits = torch.logsumexp(role_logits[:, 1:], dim=-1) - role_logits[:, 0]
+
+                # Build anchor-slice boolean mask for downstream use and override.
+                is_anchor_slice = torch.zeros(N_valid, dtype=torch.bool, device=x.device)
+                if anchor_valid.any():
+                    is_anchor_slice[anchor_global_in_jk[anchor_valid]] = True
+
+                # Anchor is the pion — clamp its in-chain logit very high so all
+                # downstream hit-gating / softmax consumers treat it as triggered.
+                in_chain_logits = torch.where(
+                    is_anchor_slice,
+                    torch.full_like(in_chain_logits, 20.0),
+                    in_chain_logits,
+                )
+
+                output['atar_role_logits'] = role_logits
+                output['atar_anchor_slice_mask'] = is_anchor_slice
+                output['atar_slice_event_idx'] = slice_event_idx
+                # Back-compat: downstream heads still read 'atar_trigger_logits'
+                # as a per-slice "in-chain" score.
+                atar_trigger_logits = in_chain_logits
                 output['atar_trigger_logits'] = atar_trigger_logits
                 atar_trigger_probs = torch.sigmoid(atar_trigger_logits).detach()
 
-                # Update event tokens with self-attention-refined representations
-                atar_event_tokens = refined_flat
+                # Downstream event-builder / pion-stop heads consume D_A tokens,
+                # so hand them the last-layer output (not the JK concat).
+                atar_event_tokens = last_flat
                 output['atar_event_tokens'] = atar_event_tokens
 
-            # === PHASE 10: Pion Stop Extraction (per-graph, soft-gated) ===
+            # === PHASE 10: Pion Stop Extraction (stereo softmax pooling) ===
+            # Separate x-branch (pools x-hits → x, z_from_x) and y-branch
+            # (pools y-hits → y, z_from_y). Per-hit score combines trigger
+            # logit and pion-class logit under a learned temperature.
+            # Bounded residual from joint features captures sub-strip depth
+            # encoded in energy (Bragg peak).
             if task_weights.get('w_pion_kinematics', 0.0) > 0.0 and 'atar_trigger_logits' in output:
-                # Broadcast trigger probs from valid-slice level to hit level
-                trigger_prob_full = torch.zeros(num_global_slices, device=x.device)
-                trigger_prob_full[valid_slice_mask] = atar_trigger_probs
-                hit_trigger_prob = trigger_prob_full[global_slice_idx_all]  # [N_atar]
+                from torch_geometric.utils import softmax as pyg_softmax
 
-                # Pion class prob = column 0 of node PDG sigmoid (DETACHED)
-                pion_class_prob = torch.sigmoid(output['atar_node_pdg'][:, 0]).detach()  # [N_atar]
+                # Broadcast trigger LOGITS (not probs) to hit level. Slices
+                # outside valid_slice_mask get a very negative logit so they
+                # contribute ~0 weight under softmax.
+                trigger_logit_full = torch.full((num_global_slices,), -50.0, device=x.device)
+                trigger_logit_full[valid_slice_mask] = atar_trigger_logits.detach()
+                hit_trigger_logit = trigger_logit_full[global_slice_idx_all]  # [N_atar]
 
-                pion_gate = (hit_trigger_prob * pion_class_prob).unsqueeze(-1)  # [N_atar, 1]
+                # Pion class logit per hit (DETACHED — used only as soft gate)
+                hit_pion_logit = output['atar_node_pdg'][:, 0].detach()  # [N_atar]
 
-                # Pool pion-gated features per graph
+                # Learnable endpoint score: the ONLY trainable path from
+                # pion_stop loss to the softmax weights. Discriminates
+                # *within* the pion track (trig+pion logits gate out
+                # non-pion hits before it competes).
+                endpoint_logit = self.pion_endpoint_scorer(h_atar).squeeze(-1)  # [N_atar]
+
+                tau = torch.exp(self.pion_pool_log_tau).clamp(min=0.1, max=10.0)
+                hit_score = (hit_trigger_logit + hit_pion_logit + endpoint_logit) / tau
+
                 batch_atar = batch[is_atar]
-                h_atar_pion_gated = h_atar * pion_gate
-                pion_event_pool = global_add_pool(h_atar_pion_gated, batch_atar, size=num_graphs_in_batch)
-                pion_gate_sum = global_add_pool(pion_gate, batch_atar, size=num_graphs_in_batch)
-                pion_event_pool = pion_event_pool / pion_gate_sum.clamp(min=1e-6)
+                pos_atar = x[is_atar, 0:3]  # [N_atar, 3]
+                is_x_local = is_atar_x[is_atar]  # [N_atar] bool
+                is_y_local = is_atar_y[is_atar]
 
-                # Regress pion stop position [B, 3]
-                pion_stop_pred = self.pion_stop_head(pion_event_pool)
+                # Per-event view presence flags
+                ones_atar = torch.ones(is_x_local.shape[0], 1, device=x.device)
+                n_x_per_event = global_add_pool(
+                    is_x_local.float().unsqueeze(-1) * ones_atar, batch_atar,
+                    size=num_graphs_in_batch).squeeze(-1)
+                n_y_per_event = global_add_pool(
+                    is_y_local.float().unsqueeze(-1) * ones_atar, batch_atar,
+                    size=num_graphs_in_batch).squeeze(-1)
+                has_x_event = (n_x_per_event > 0).float().unsqueeze(-1)  # [B,1]
+                has_y_event = (n_y_per_event > 0).float().unsqueeze(-1)
+
+                # X-branch: softmax over x-hits within each event
+                if is_x_local.any():
+                    score_x = hit_score[is_x_local]
+                    batch_x = batch_atar[is_x_local]
+                    pos_x_hits = pos_atar[is_x_local]
+                    h_x_hits = h_atar[is_x_local]
+                    w_x = pyg_softmax(score_x, batch_x, num_nodes=num_graphs_in_batch).unsqueeze(-1)
+                    pooled_x_coord = global_add_pool(w_x * pos_x_hits[:, 0:1], batch_x, size=num_graphs_in_batch)
+                    pooled_z_from_x = global_add_pool(w_x * pos_x_hits[:, 2:3], batch_x, size=num_graphs_in_batch)
+                    pooled_feat_x = global_add_pool(w_x * h_x_hits, batch_x, size=num_graphs_in_batch)
+                else:
+                    pooled_x_coord = torch.zeros(num_graphs_in_batch, 1, device=x.device)
+                    pooled_z_from_x = torch.zeros(num_graphs_in_batch, 1, device=x.device)
+                    pooled_feat_x = torch.zeros(num_graphs_in_batch, jk_dim, device=x.device)
+
+                # Y-branch: softmax over y-hits within each event
+                if is_y_local.any():
+                    score_y = hit_score[is_y_local]
+                    batch_y = batch_atar[is_y_local]
+                    pos_y_hits = pos_atar[is_y_local]
+                    h_y_hits = h_atar[is_y_local]
+                    w_y = pyg_softmax(score_y, batch_y, num_nodes=num_graphs_in_batch).unsqueeze(-1)
+                    pooled_y_coord = global_add_pool(w_y * pos_y_hits[:, 1:2], batch_y, size=num_graphs_in_batch)
+                    pooled_z_from_y = global_add_pool(w_y * pos_y_hits[:, 2:3], batch_y, size=num_graphs_in_batch)
+                    pooled_feat_y = global_add_pool(w_y * h_y_hits, batch_y, size=num_graphs_in_batch)
+                else:
+                    pooled_y_coord = torch.zeros(num_graphs_in_batch, 1, device=x.device)
+                    pooled_z_from_y = torch.zeros(num_graphs_in_batch, 1, device=x.device)
+                    pooled_feat_y = torch.zeros(num_graphs_in_batch, jk_dim, device=x.device)
+
+                # Combine z: average of view-contributed estimates (denom ≥ 1 avoids /0)
+                pooled_z = (pooled_z_from_x * has_x_event + pooled_z_from_y * has_y_event) \
+                    / (has_x_event + has_y_event).clamp(min=1.0)
+                # If an event is missing a view, clone the available transverse
+                # coord so downstream math is well-defined (the residual will
+                # refine it, though an event with only one view won't be well
+                # constrained in the missing axis).
+                pooled_x_coord = pooled_x_coord * has_x_event
+                pooled_y_coord = pooled_y_coord * has_y_event
+                pooled_pos = torch.cat([pooled_x_coord, pooled_y_coord, pooled_z], dim=-1)  # [B, 3]
+
+                # Per-axis bounded residuals (mirrors endpoint head structure):
+                #   x residual sees x-branch only; y residual sees y-branch only;
+                #   z residual is stereo (both branches).
+                res_input_x = torch.cat([pooled_x_coord, pooled_feat_x], dim=-1)
+                res_input_y = torch.cat([pooled_y_coord, pooled_feat_y], dim=-1)
+                res_input_z = torch.cat([pooled_z, pooled_feat_x, pooled_feat_y], dim=-1)
+                delta_x = torch.tanh(self.pion_stop_residual_x(res_input_x))  # [B, 1]
+                delta_y = torch.tanh(self.pion_stop_residual_y(res_input_y))  # [B, 1]
+                delta_z = torch.tanh(self.pion_stop_residual_z(res_input_z))  # [B, 1]
+                # Suppress residuals for axes that have no hits (sanity).
+                delta_x = delta_x * has_x_event
+                delta_y = delta_y * has_y_event
+                delta = torch.cat([delta_x, delta_y, delta_z], dim=-1) * self.pion_stop_residual_scale
+                pion_stop_pred = pooled_pos + delta
                 output['atar_pion_stop'] = pion_stop_pred
             else:
                 pion_stop_pred = torch.zeros(num_graphs_in_batch, 3, device=x.device)
 
-            # === PHASE 11: Positron Direction (per-graph, soft-gated) ===
-            # Compute scatter-corrected exit direction from endpoints (always, for LYSO context)
-            endpoints_det = output['atar_endpoints'].detach()  # [N_valid_slices, 2, 3, 3]
-            start_median = endpoints_det[:, 0, :, 1]  # [N_valid_slices, 3]
-            stop_median = endpoints_det[:, 1, :, 1]   # [N_valid_slices, 3]
-            slice_exit_dir = F.normalize(stop_median - start_median, p=2, dim=-1)  # [N_valid_slices, 3]
-
-            # Trigger-weighted average exit direction per graph
-            slice_trigger_w = atar_trigger_probs.unsqueeze(-1) if 'atar_trigger_logits' in output \
-                else torch.ones(slice_exit_dir.size(0), 1, device=x.device)
-            weighted_exit = slice_exit_dir * slice_trigger_w  # [N_valid_slices, 3]
-
-            # Map valid slices to graph indices for per-graph pooling
-            B_slice_idx = valid_slice_mask.nonzero().squeeze(1) // num_slices_max  # [N_valid_slices]
-            exit_dir_sum = torch.zeros(num_graphs_in_batch, 3, device=x.device)
-            exit_weight_sum = torch.zeros(num_graphs_in_batch, 1, device=x.device)
-            exit_dir_sum.index_add_(0, B_slice_idx, weighted_exit)
-            exit_weight_sum.index_add_(0, B_slice_idx, slice_trigger_w)
-            exit_dir_per_graph = F.normalize(
-                exit_dir_sum / exit_weight_sum.clamp(min=1e-6), p=2, dim=-1
-            )  # [B, 3] unit vector
+            # === PHASE 11: Positron Direction (per-graph, stereo hard-gated) ===
+            # (exit_dir_per_graph removed — pion direction carries no physical
+            # information about positron direction for a stopped pion.)
 
             # Per-graph positron reference time: unweighted mean of normalized
             # hit times over ATAR hits that are both in the triggering slice
@@ -1009,34 +1356,65 @@ class PURITYHybridModel(nn.Module):
                 )  # [B] normalized (col 4 is already /NORM_T_ATAR=500)
 
             if task_weights.get('w_positron_angle', 0.0) > 0.0 and 'atar_trigger_logits' in output:
-                # MIP/positron class prob = column 2 of node PDG sigmoid (DETACHED)
+                # Hard positron-hit mask: trigger-slice AND MIP-like. Both upstream
+                # heads are pretrained and detached here, so the boolean mask does
+                # not break gradients to h_atar — only determines which hits enter
+                # each branch's mean pool. On hits passing the mask, full gradient
+                # flows through h_atar into the backbone as usual.
                 mip_class_prob = torch.sigmoid(output['atar_node_pdg'][:, 2]).detach()  # [N_atar]
+                trigger_prob_full = torch.zeros(num_global_slices, device=x.device)
+                trigger_prob_full[valid_slice_mask] = atar_trigger_probs
+                hit_trigger_prob = trigger_prob_full[global_slice_idx_all]
 
-                # Reuse hit_trigger_prob from Phase 10 if available, otherwise recompute
-                if 'atar_pion_stop' not in output:
-                    trigger_prob_full = torch.zeros(num_global_slices, device=x.device)
-                    trigger_prob_full[valid_slice_mask] = atar_trigger_probs
-                    hit_trigger_prob = trigger_prob_full[global_slice_idx_all]
-
-                mip_gate = (hit_trigger_prob * mip_class_prob).unsqueeze(-1)  # [N_atar, 1]
+                positron_mask = (hit_trigger_prob > 0.5) & (mip_class_prob > 0.5)  # [N_atar]
 
                 batch_atar = batch[is_atar]
-                h_atar_mip_gated = h_atar * mip_gate
-                mip_event_pool = global_add_pool(h_atar_mip_gated, batch_atar, size=num_graphs_in_batch)
-                mip_gate_sum = global_add_pool(mip_gate, batch_atar, size=num_graphs_in_batch)
-                mip_event_pool = mip_event_pool / mip_gate_sum.clamp(min=1e-6)
+                is_x_local = is_atar_x[is_atar]
+                is_y_local = is_atar_y[is_atar]
+                mask_x = positron_mask & is_x_local
+                mask_y = positron_mask & is_y_local
 
-                # Concatenate with detached pion stop + scatter-corrected exit direction
-                dir_input = torch.cat([mip_event_pool, pion_stop_pred.detach(), exit_dir_per_graph.detach()], dim=-1)
+                # Per-view mean pool of positron hits.
+                def _mean_pool_view(mask_view):
+                    if mask_view.any():
+                        h_v = h_atar[mask_view]
+                        b_v = batch_atar[mask_view]
+                        ones_v = torch.ones(h_v.shape[0], 1, device=x.device)
+                        sum_feat = global_add_pool(h_v, b_v, size=num_graphs_in_batch)
+                        n_v = global_add_pool(ones_v, b_v, size=num_graphs_in_batch)
+                        pool = sum_feat / n_v.clamp(min=1.0)
+                        has_v = (n_v > 0).float()
+                    else:
+                        pool = torch.zeros(num_graphs_in_batch, jk_dim, device=x.device)
+                        has_v = torch.zeros(num_graphs_in_batch, 1, device=x.device)
+                    return pool, has_v
+
+                pool_x_pos, _ = _mean_pool_view(mask_x)
+                pool_y_pos, _ = _mean_pool_view(mask_y)
+
+                dir_input = torch.cat([pool_x_pos, pool_y_pos, pion_stop_pred.detach()], dim=-1)
                 positron_dir = self.positron_dir_head(dir_input)  # [B, 3] unit vector
                 output['atar_positron_dir'] = positron_dir
             else:
                 positron_dir = torch.tensor([[0.0, 0.0, 1.0]], device=x.device).expand(num_graphs_in_batch, -1)
+
+            # === Phase 11b: has-trigger-positron (pure decision rule) ===
+            # Per-slice count of hits passing (trigger>0.5 AND mip>0.5).
+            # Event is flagged htp=1 iff ANY slice has >= 2 qualifying hits.
+            # No parameters, no loss — consumed only at inference.
+            if ('atar_hit_trigger_prob' in output
+                    and 'atar_hit_mip_prob' in output):
+                hit_trig = output['atar_hit_trigger_prob']      # [N_atar]
+                hit_mip  = output['atar_hit_mip_prob']          # [N_atar]
+                qualifies = ((hit_trig > 0.5) & (hit_mip > 0.5)).float()
+                slice_count = torch.zeros(num_global_slices, device=x.device)
+                slice_count.index_add_(0, global_slice_idx_all, qualifies)
+                slice_count = slice_count.view(num_graphs_in_batch, num_slices_max)
+                output['has_trigger_positron_rule'] = (slice_count >= 2.0).any(dim=1).float()
         else:
             # No ATAR hits — provide default direction/position for LYSO token construction
             pion_stop_pred = torch.zeros(num_graphs_in_batch, 3, device=x.device)
             positron_dir = torch.tensor([[0.0, 0.0, 1.0]], device=x.device).expand(num_graphs_in_batch, -1)
-            exit_dir_per_graph = torch.tensor([[0.0, 0.0, 1.0]], device=x.device).expand(num_graphs_in_batch, -1)
             # No ATAR → no positron reference: use the same -500 sentinel as above.
             positron_time_per_graph = torch.full(
                 (num_graphs_in_batch,), -500.0, device=x.device)
@@ -1096,10 +1474,19 @@ class PURITYHybridModel(nn.Module):
             actual_k = max(actual_k, 1) # Prevent topk with k=0
             
             topk_vals, topk_idx = torch.topk(g_beta_seeds, k=actual_k, dim=1) # [B, actual_k]
-            
+
             topk_idx_expand = topk_idx.unsqueeze(-1).expand(-1, -1, 3)
             seed_coords = torch.gather(g_coords, dim=1, index=topk_idx_expand) # [B, actual_k, 3]
             seed_beta = torch.gather(g_beta, dim=1, index=topk_idx)            # [B, actual_k]
+
+            # Threshold filter: residual sibling seeds (β stuck around 0.25 after BCE
+            # highlander) are not real cluster centers. Real pileup gives β≈1 on each
+            # genuine seed, so 0.5 is a clean cut between residual and legitimate.
+            # Zeroing seed_β here propagates through affinity/pool/cluster_energy_sum
+            # naturally — the existing seed_has_weight check (w_sum > 1e-4) will then
+            # mark these seeds invalid downstream.
+            seed_beta_threshold = 0.5
+            seed_beta = seed_beta * (seed_beta > seed_beta_threshold).float()
             
             dists = torch.cdist(g_coords, seed_coords) # [B, N_max, actual_k]
             
@@ -1156,7 +1543,14 @@ class PURITYHybridModel(nn.Module):
             seed_structural = topk_idx < lengths.unsqueeze(-1)       # [B, actual_k]
             w_sum_per_k = w_norm.sum(dim=1)                          # [B, actual_k] unclamped
             seed_has_weight = w_sum_per_k > 1e-4                     # [B, actual_k]
-            seed_is_valid = seed_structural & seed_has_weight
+            # A seed can be structurally real and weight-valid yet still have
+            # cluster_energy_sum ≈ 0 (e.g. if every assigned hit has E rounded
+            # to zero, which the upstream smearing fix in root_to_parquet should
+            # prevent — but defensive checks are cheap and protect against
+            # similar regressions). Without this, cluster_energy_time below
+            # divides by ~0 and produces NaN that propagates everywhere.
+            seed_has_energy = cluster_energy_sum > 1e-9              # [B, actual_k]
+            seed_is_valid = seed_structural & seed_has_weight & seed_has_energy
             seed_invalid = ~seed_is_valid
 
             # Energy-weighted mean time (more physical than affinity-weighted).
@@ -1690,7 +2084,7 @@ class PURITYHybridModel(nn.Module):
         if trig_p is not None and mip_p is not None and is_atar.any():
             pos_mask = ((trig_p > 0.5) & (mip_p > 0.5)).float()
             batch_atar = batch[is_atar]
-            e_atar = x[is_atar, 3]
+            e_atar = x[is_atar, 3] * NORM_E_ATAR  # back to physical MeV
             pos_energy.index_add_(0, batch_atar, e_atar * pos_mask)
             has_any = True
 
@@ -1720,7 +2114,7 @@ class PURITYHybridModel(nn.Module):
             p_hit = (wb * p_bk[hit_vg]).sum(dim=1) / wb_sum  # [N_lyso]
             output['lyso_hit_trigger_prob'] = p_hit.detach()
             lyso_mask = (p_hit > 0.5).float()
-            e_lyso = x[is_lyso, 3]
+            e_lyso = x[is_lyso, 3] * NORM_E_LYSO  # back to physical MeV
             pos_energy.index_add_(0, hit_graph, e_lyso * lyso_mask)
             has_any = True
 
@@ -1734,16 +2128,108 @@ class PURITYHybridModel(nn.Module):
             (ps_raw[:, 0].abs() < ACCEPT_XY_MAX_MM) & (ps_raw[:, 1].abs() < ACCEPT_XY_MAX_MM)
         )
         angle_ok = positron_dir[:, 2] > _ACCEPT_ANGLE_COS
-        accepted = (fiducial & angle_ok).float()
+        htp_rule = output.get('has_trigger_positron_rule')
+        if htp_rule is not None:
+            accepted = (fiducial & angle_ok & (htp_rule > 0.5)).float()
+        else:
+            accepted = (fiducial & angle_ok).float()
 
-        output['event_summary'] = {
+        # === Dead-material energy head (detached, post-hoc regression) ===
+        # All inputs are detached so this head cannot influence upstream
+        # predictions (especially the positron-direction head). Output is
+        # log(1 + dead_E_pred) in MeV; converted back via expm1 for the
+        # event summary. Reported but NOT used in the acceptance rule.
+        def _angle_features(direction):
+            cos_t = direction[:, 2]
+            sin_t = torch.sqrt((1.0 - cos_t.pow(2)).clamp(min=1e-6))
+            cos_p = direction[:, 0] / sin_t
+            cos_p = torch.where(sin_t < 1e-3, torch.zeros_like(cos_p), cos_p)
+            return cos_t, cos_p
+
+        cos_t_pos, cos_p_pos = _angle_features(positron_dir.detach())
+
+        # Exit direction from the predicted-positron slice's endpoints.
+        # Pick the slice with the largest p_e per event (excluding anchor).
+        exit_unit = torch.zeros(B, 3, device=device)
+        role_logits_de = output.get('atar_role_logits')
+        slice_event_idx_de = output.get('atar_slice_event_idx')
+        endpoints_de = output.get('atar_endpoints')
+        anchor_mask_de = output.get('atar_anchor_slice_mask')
+        if (role_logits_de is not None and slice_event_idx_de is not None
+                and endpoints_de is not None):
+            rl_d = role_logits_de.detach()
+            ev_idx_d = slice_event_idx_de.detach()
+            ep_d = endpoints_de.detach()
+            pe_per_slice = F.softmax(rl_d, dim=-1)[:, 2]
+            if anchor_mask_de is not None:
+                pe_per_slice = pe_per_slice * (~anchor_mask_de).float()
+            pred_start_n = ep_d[:, 0, :, 1]   # normalized units (direction unaffected)
+            pred_stop_n  = ep_d[:, 1, :, 1]
+            for ev in range(B):
+                m = (ev_idx_d == ev)
+                if m.any():
+                    pe_ev = torch.where(m, pe_per_slice, torch.full_like(pe_per_slice, -1.0))
+                    if float(pe_ev.max().item()) > 1e-6:
+                        i = int(pe_ev.argmax().item())
+                        diff = pred_stop_n[i] - pred_start_n[i]
+                        n = diff.norm()
+                        if n > 1e-6:
+                            exit_unit[ev] = diff / n
+        cos_t_exit, cos_p_exit = _angle_features(exit_unit)
+
+        # Total positron-tagged energy (MeV), normalized by NORM_E_LYSO.
+        pos_E_safe = torch.where(pos_energy > 0,
+                                 pos_energy,
+                                 torch.zeros_like(pos_energy))
+        total_E_norm = (pos_E_safe / NORM_E_LYSO).detach()
+
+        # Energy-weighted mean LYSO position (already normalized in the dataset).
+        mean_x_lyso = torch.zeros(B, device=device)
+        mean_y_lyso = torch.zeros(B, device=device)
+        mean_z_lyso = torch.zeros(B, device=device)
+        if 'lyso_hit_trigger_prob' in output and is_lyso.any():
+            p_hit_d = output['lyso_hit_trigger_prob'].detach()
+            mask_d = (p_hit_d > 0.5).float()
+            e_lyso_mev = (x[is_lyso, 3] * NORM_E_LYSO).detach()
+            gated = e_lyso_mev * mask_d
+            batch_lyso_d = batch[is_lyso].detach()
+            sum_E   = torch.zeros(B, device=device)
+            sum_xE  = torch.zeros(B, device=device)
+            sum_yE  = torch.zeros(B, device=device)
+            sum_zE  = torch.zeros(B, device=device)
+            sum_E.index_add_(0, batch_lyso_d, gated)
+            sum_xE.index_add_(0, batch_lyso_d, x[is_lyso, 0].detach() * gated)
+            sum_yE.index_add_(0, batch_lyso_d, x[is_lyso, 1].detach() * gated)
+            sum_zE.index_add_(0, batch_lyso_d, x[is_lyso, 2].detach() * gated)
+            safe_E = sum_E.clamp(min=1e-6)
+            has_lyso = sum_E > 0
+            mean_x_lyso = torch.where(has_lyso, sum_xE / safe_E, mean_x_lyso)
+            mean_y_lyso = torch.where(has_lyso, sum_yE / safe_E, mean_y_lyso)
+            mean_z_lyso = torch.where(has_lyso, sum_zE / safe_E, mean_z_lyso)
+
+        dead_input = torch.stack([
+            cos_t_pos, cos_p_pos,
+            cos_t_exit, cos_p_exit,
+            total_E_norm,
+            mean_x_lyso, mean_y_lyso, mean_z_lyso,
+        ], dim=1)
+        log_dead_pred = self.dead_energy_head(dead_input).squeeze(-1)  # [B]
+        dead_energy_pred = torch.expm1(log_dead_pred)                  # MeV
+        output['dead_energy_log_pred'] = log_dead_pred                  # for loss
+        output['dead_energy_pred']     = dead_energy_pred.detach()      # diagnostic
+
+        summary = {
             'pion_stop': pion_stop.detach(),
             'positron_dir': positron_dir.detach(),
             'positron_polar_angle': polar_angle.detach(),
             'positron_time': pos_time.detach(),
             'positron_energy': pos_energy.detach(),
+            'dead_energy': dead_energy_pred.detach(),
             'accepted': accepted.detach(),
         }
+        if htp_rule is not None:
+            summary['has_trigger_positron'] = htp_rule.detach()
+        output['event_summary'] = summary
 
         return output
 

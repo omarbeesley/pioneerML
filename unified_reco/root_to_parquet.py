@@ -1,3 +1,30 @@
+"""
+Convert PIONEER ROOT simulation files to a flat per-event Parquet dataset.
+
+Reads `sim` trees from one or many `.root` files, walks each event's
+Geant4 tracks, time-bucket-merges deposits per ATAR strip / LYSO crystal,
+and writes ragged columnar arrays to a Parquet file. Per-event scalars
+include truth kinematics, the dead-material energy lost by the triggering
+positron's lineage, the positron-only ATAR ionization, and the
+sensitive-material total (live_E = atar_posE + lyso_E).
+
+Usage:
+    python root_to_parquet.py --input "/path/to/dir/or/glob/*.root" \\
+                              --output /path/to/out.parquet \\
+                              [--max_events N] [--max_files M] \\
+                              [--shuffle_files] [--seed S]
+
+Examples:
+    # Single directory, 100k events, file-shuffled run:
+    python root_to_parquet.py \\
+        --input  /mnt/e/global_ai_recon/pie/train \\
+        --output unmixed_pie_train.parquet \\
+        --max_events 100000 --shuffle_files --seed 42
+
+    # Glob pattern across multiple directories:
+    python root_to_parquet.py --input "/data/run000*-*.root" \\
+                              --output run000.parquet
+"""
 import ROOT
 import sys
 import os
@@ -110,6 +137,18 @@ def process_root_file(file_list, geoheader, atarheader, geo_lookup, output_file,
     out_lyso_t = []
     out_lyso_pdg = []
     out_lyso_slice = []
+
+    # Per-event dead-material energy (sum of track edep in volumes that are
+    # neither ATAR nor LYSO, within the same digitization time window).
+    out_dead_E = []
+
+    # Per-event positron-only ATAR energy: sum of edep from tracks with
+    # pdg == -11 (positron) restricted to ATAR volumes.
+    out_atar_posE = []
+
+    # Per-event "live" energy = atar_posE + total lyso_E (all sensitive-material
+    # signal; excludes pion Bragg peak in ATAR and dead-material losses).
+    out_live_E = []
     
     # Global Physics Truths
     out_theta_init = []
@@ -168,6 +207,12 @@ def process_root_file(file_list, geoheader, atarheader, geo_lookup, output_file,
         event_hits_atar = {} # vol_id -> list of dicts: {'x':, 'y':, 'z':, 't':, 'E':, 'view':, 'pdg':}
         event_hits_lyso = {} # vol_id -> list of dicts
 
+        # Accumulated dead-material energy for this event (MeV).
+        evt_dead_E = 0.0
+
+        # Positron-only ATAR energy accumulator (summed across positron tracks).
+        evt_atar_posE = 0.0
+
         pionStopX, pionStopY, pionStopZ = 0.0, 0.0, 0.0
         endpoints = {
             211: {'start': [np.nan]*3, 'stop': [np.nan]*3},
@@ -175,9 +220,54 @@ def process_root_file(file_list, geoheader, atarheader, geo_lookup, output_file,
             -11: {'start': [np.nan]*3, 'stop': [np.nan]*3}
         }
 
+        # Pre-pass: build track ancestry so we can classify deposits by lineage.
+        # dead_E attribution should include the signal positron and its descendants
+        # (brem γ, pair e±) but exclude pion/muon tracks AND their descendants
+        # (δ-rays, nuclear fragments). PDG alone doesn't distinguish a pion δ-ray
+        # electron from a positron-shower electron.
+        track_parent = {}
+        track_pdg    = {}
+        for t in entry.track:
+            tid = t.GetTrackID()
+            track_parent[tid] = t.GetParentID()
+            track_pdg[tid]    = t.GetPDGID()
+
+        # Find the signal positron: smallest trackID positron (first created).
+        positron_tid = None
+        for tid, pdg_i in track_pdg.items():
+            if pdg_i == -11 and (positron_tid is None or tid < positron_tid):
+                positron_tid = tid
+
+        # Memoized ancestry: is `tid` the positron or a descendant?
+        from_positron = {}
+        def _is_from_positron(tid):
+            if tid in from_positron: return from_positron[tid]
+            if positron_tid is None:
+                from_positron[tid] = False
+                return False
+            cur = tid
+            visited = []
+            while cur in track_parent:
+                if cur == positron_tid:
+                    result = True
+                    break
+                visited.append(cur)
+                p = track_parent[cur]
+                if p == 0 or p == cur:
+                    result = False
+                    break
+                cur = p
+            else:
+                result = False
+            for v in visited + [tid]:
+                from_positron[v] = result
+            return result
+
         # 3. Track Hit Processing
         for track in entry.track:
             pdg = track.GetPDGID()
+            tid = track.GetTrackID()
+            track_from_positron = _is_from_positron(tid)
             # Allow all particles to deposit energy (e.g. Gammas=22). Unrecognized PDGs get mapped to OTHER bitmask.
             
             # Accessors
@@ -219,6 +309,14 @@ def process_root_file(file_list, geoheader, atarheader, geo_lookup, output_file,
             sum_e = np.bincount(inv_valid, weights=edep_valid, minlength=len(unique_vols))
             safe_div = np.where(sum_e == 0, 1.0, sum_e)
 
+            # Dead-material energy: volumes that are neither kAtar nor kCalo.
+            # Include only tracks whose ancestry traces to the signal positron
+            # (positron itself + brem γ + pair products). Pion/muon and their
+            # δ-ray descendants are excluded.
+            is_dead_lookup = ~(is_atar_lookup | is_lyso_lookup)
+            if is_dead_lookup.any() and track_from_positron:
+                evt_dead_E += float(sum_e[is_dead_lookup].sum())
+
             avg_x = np.bincount(inv_valid, weights=post_x[mask_energy] * edep_valid, minlength=len(unique_vols)) / safe_div
             avg_y = np.bincount(inv_valid, weights=post_y[mask_energy] * edep_valid, minlength=len(unique_vols)) / safe_div
             avg_z = np.bincount(inv_valid, weights=post_z[mask_energy] * edep_valid, minlength=len(unique_vols)) / safe_div
@@ -231,23 +329,64 @@ def process_root_file(file_list, geoheader, atarheader, geo_lookup, output_file,
 
             atar_indices = valid_indices[is_atar_lookup[valid_indices]]
             lyso_indices = valid_indices[is_lyso_lookup[valid_indices]]
+
+            # Positron-only ATAR energy: attribute this track's ATAR deposits
+            # to positron accumulator iff the track is a positron (pdg -11).
+            if pdg == -11 and len(atar_indices) > 0:
+                evt_atar_posE += float(sum_e[atar_indices].sum())
             
             # Legacy Physical Smearing Validation (ATAR uses flat resolution)
             if len(atar_indices) > 0:
                 avg_t[atar_indices] += np.random.normal(0, 0.2, size=len(atar_indices))
                 sum_e[atar_indices] = smear_atar(sum_e[atar_indices], 0.15)
                 
-            # Legacy Physical Smearing Validation (LYSO uses empirical energy-dependent resolutions)
+            # Physical Smearing (LYSO uses empirical energy-dependent resolutions).
+            # σ_E/E = √((a/√E)² + (b/E)² + c²) with a=6, b=50, c=1.2 (in %)
+            # σ_t   = √((a/E)²   + (b/√E)² + c²) with a=300, b=600, c=75 (in ps)
+            #
+            # Three stages:
+            #   1. Pre-cut at LYSO_PRE_SMEAR_E — drop deposits so small that even
+            #      a 1σ up-fluctuation couldn't trigger, AND avoid the pathological
+            #      σ_t / σ_E divergence at sub-keV truth deposits.
+            #   2. Apply σ_E and σ_t smearing using TRUTH energy. Both σs scale
+            #      with photon statistics N ∝ truth E, so smearing must be
+            #      parametrised by truth, not by the σ_E-noisy "measured" E.
+            #   3. Apply the trigger threshold LYSO_TRIG_E to the *smeared*
+            #      energy, mimicking what a real digitizer does.
+            LYSO_PRE_SMEAR_E = 0.05   # MeV — coarse "real deposit" sanity floor
+            LYSO_TRIG_E      = 0.20   # MeV — digitizer trigger threshold (post-smear)
             if len(lyso_indices) > 0:
-                lyso_E_safe = np.maximum(sum_e[lyso_indices], 1e-9)
-            #     
-            #     # Energy Smear (a=6, b=50, c=1.2)
-            #     res_frac = np.sqrt((6 / np.sqrt(lyso_E_safe))**2 + (50 / lyso_E_safe)**2 + 1.2**2) / 100.0
-            #     sum_e[lyso_indices] = np.maximum(sum_e[lyso_indices] * (1 + np.random.normal(0, res_frac)), 0.05)
-            #     
-            #     # Time Smear (a=300, b=600, c=75 ps -> ns)
-            #     sigma_t = np.sqrt((300 / lyso_E_safe)**2 + (600 / np.sqrt(lyso_E_safe))**2 + 75**2) / 1000.0
-            #     avg_t[lyso_indices] += np.random.normal(0, sigma_t)
+                keep = sum_e[lyso_indices] > LYSO_PRE_SMEAR_E
+                lyso_indices = lyso_indices[keep]
+
+            if len(lyso_indices) > 0:
+                lyso_E_truth = sum_e[lyso_indices].copy()   # captured before smearing; used by σ_t
+
+                # Energy smear. σ_E/E from the formula diverges at low E (b/E
+                # term); cap at 10% so smeared hits remain physically interpretable
+                # and so a single noise draw can't inflate or deflate by orders
+                # of magnitude.
+                res_frac_raw = np.sqrt((6 / np.sqrt(lyso_E_truth))**2
+                                       + (50 / lyso_E_truth)**2
+                                       + 1.2**2) / 100.0
+                res_frac = np.minimum(res_frac_raw, 0.10)
+                sum_e[lyso_indices] = np.maximum(
+                    sum_e[lyso_indices] * (1 + np.random.normal(0, res_frac)),
+                    0.0,
+                )
+
+                # Time smear (ps → ns) using TRUTH energy (photon-statistics-limited
+                # timing depends on the real photon count N ∝ E_truth, not on the
+                # σ_E-noisy "measured" E — using smeared E would double-count).
+                sigma_t = np.sqrt((300 / lyso_E_truth)**2
+                                  + (600 / np.sqrt(lyso_E_truth))**2
+                                  + 75**2) / 1000.0
+                avg_t[lyso_indices] += np.random.normal(0, sigma_t)
+
+                # Trigger threshold applied to smeared (measured) E. Hits whose
+                # smeared signal falls below trigger don't get recorded.
+                survive = sum_e[lyso_indices] > LYSO_TRIG_E
+                lyso_indices = lyso_indices[survive]
 
             def merge_hit(hit_list, new_hit, merge_window):
                 for hit in hit_list:
@@ -260,8 +399,12 @@ def process_root_file(file_list, geoheader, atarheader, geo_lookup, output_file,
                             hit['y'] = hit['y'] * f_old + new_hit['y'] * f_new
                             hit['z'] = hit['z'] * f_old + new_hit['z'] * f_new
                             hit['truth_t'] = hit['truth_t'] * f_old + new_hit['truth_t'] * f_new
-                            # DO NOT SHIFT TIME during merge, keep original anchor
-                            # hit['t'] = hit['t'] * f_old + new_hit['t'] * f_new
+                            # Energy-weight the smeared time too. Was previously
+                            # frozen as the first-in track's smeared time, which
+                            # corrupted high-E merged hits when a low-E precursor
+                            # (with much larger σ_t under the smearing formula)
+                            # was processed first.
+                            hit['t'] = hit['t'] * f_old + new_hit['t'] * f_new
                         hit['E'] = e_tot
                         # Bitwise OR for PDGs if multiple particles hit same strip AT EXACT SAME TIME
                         hit['pdg_mask'] |= new_hit['pdg_mask']
@@ -289,25 +432,37 @@ def process_root_file(file_list, geoheader, atarheader, geo_lookup, output_file,
                     merge_hit(event_hits_lyso[v_id], new_hit, merge_window=10.0)
 
         # 4. Calorimeter Exclusive Hit Processing (e.g. Gammas)
-        # Uncharged particles often don't leave Geant4 'tracks' but DO deposit in entry.calo
+        # Uncharged particles often don't leave Geant4 'tracks' but DO deposit in entry.calo.
+        # crystal.GetTotalEnergyDeposit() returns the FULL deposit for the crystal, including
+        # contributions from tracked particles already added in pass 3. Subtract those so we
+        # only add the untracked remainder (gammas, etc.) — otherwise LYSO is double-counted.
+        tracked_per_crystal = {
+            c_id: sum(h['E'] for h in hits)
+            for c_id, hits in event_hits_lyso.items()
+        }
         for crystal in entry.calo:
-            edep = crystal.GetTotalEnergyDeposit()
-            if edep < 1e-4: continue
-            
+            edep_total = crystal.GetTotalEnergyDeposit()
+            if edep_total < 1e-4: continue
+
+            c_id = int(crystal.GetCaloID())
+            edep_residual = edep_total - tracked_per_crystal.get(c_id, 0.0)
+            if edep_residual < 1e-4: continue  # fully accounted for by tracked hits
+
             # Replicate temporal mask cut and explicitly clip for log-scale plotting
             t = max(crystal.GetTime()[0], 0.05)
             if t > 10000: continue
-            
+
             pdg = crystal.GetPDGID()
             pdg_mask = pdg_to_mask(pdg)
-            
-            c_id = int(crystal.GetCaloID())
+
             xyz = geoheader.GetCentre(c_id)
             # Use same SCALE_FACTOR (1.19) from old script to map front-face to shower max
             x, y, z = xyz.X() * 1.19, xyz.Y() * 1.19, xyz.Z() * 1.19
-            
-            new_hit = {'x': float(x), 'y': float(y), 'z': float(z), 't': float(t), 'truth_t': float(t), 'E': float(edep), 'pdg_mask': pdg_mask}
-            
+
+            new_hit = {'x': float(x), 'y': float(y), 'z': float(z),
+                       't': float(t), 'truth_t': float(t),
+                       'E': float(edep_residual), 'pdg_mask': pdg_mask}
+
             if c_id not in event_hits_lyso:
                 event_hits_lyso[c_id] = []
             merge_hit(event_hits_lyso[c_id], new_hit, merge_window=10.0)
@@ -413,6 +568,13 @@ def process_root_file(file_list, geoheader, atarheader, geo_lookup, output_file,
         out_lyso_t.append(evt_lyso_t)
         out_lyso_pdg.append(evt_lyso_pdg)
         out_lyso_slice.append(evt_lyso_slice)
+
+        out_dead_E.append(float(evt_dead_E))
+
+        # Positron-only ATAR energy; live_E = positron ATAR + total LYSO.
+        evt_lyso_E_sum = float(sum(evt_lyso_E)) if len(evt_lyso_E) > 0 else 0.0
+        out_atar_posE.append(float(evt_atar_posE))
+        out_live_E.append(float(evt_atar_posE + evt_lyso_E_sum))
         
         out_theta_init.append(float(thetaInit))
         out_phi_init.append(float(phiInit))
@@ -460,7 +622,11 @@ def process_root_file(file_list, geoheader, atarheader, geo_lookup, output_file,
         pa.array(out_lyso_z),
         pa.array(out_lyso_t),
         pa.array(out_lyso_E),
-        pa.array(out_lyso_pdg)
+        pa.array(out_lyso_pdg),
+
+        pa.array(out_dead_E, type=pa.float64()),
+        pa.array(out_atar_posE, type=pa.float64()),
+        pa.array(out_live_E, type=pa.float64()),
     ], names=[
         'event_id',
         'truth_theta', 'truth_phi', 'truth_positron_energy',
@@ -471,7 +637,10 @@ def process_root_file(file_list, geoheader, atarheader, geo_lookup, output_file,
         'truth_positron_start_x', 'truth_positron_start_y', 'truth_positron_start_z',
         'truth_positron_stop_x', 'truth_positron_stop_y', 'truth_positron_stop_z',
         'atar_x', 'atar_y', 'atar_z', 'atar_t', 'atar_truth_t', 'atar_E', 'atar_view', 'atar_pdg', 'atar_slice_id',
-        'lyso_x', 'lyso_y', 'lyso_z', 'lyso_t', 'lyso_E', 'lyso_pdg'
+        'lyso_x', 'lyso_y', 'lyso_z', 'lyso_t', 'lyso_E', 'lyso_pdg',
+        'dead_E',
+        'atar_posE',
+        'live_E',
     ])
 
     print(f"Writing to {output_file}...")
@@ -484,18 +653,25 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=str, required=True, help="Output Parquet file path")
     parser.add_argument("--max_events", type=int, default=None, help="Max total events to process across all files")
     parser.add_argument("--max_files", type=int, default=None, help="Max number of ROOT files to process in batch mode")
+    parser.add_argument("--shuffle_files", action='store_true', help="Randomize ROOT file ordering before chaining")
+    parser.add_argument("--seed", type=int, default=None, help="RNG seed for --shuffle_files (reproducible)")
     args = parser.parse_args()
 
     # 1. Resolve Input Files
     input_path = args.input
     if os.path.isdir(input_path):
         input_path = os.path.join(input_path, "*.root")
-    
+
     file_list = sorted(glob.glob(input_path))
     if len(file_list) == 0:
         print(f"Error: No matching ROOT files found for pattern: {input_path}")
         sys.exit(1)
-        
+
+    if args.shuffle_files:
+        rng = random.Random(args.seed)
+        rng.shuffle(file_list)
+        print(f"Shuffled {len(file_list)} files (seed={args.seed})")
+
     if args.max_files is not None:
         print(f"Capping input at {args.max_files} files (Found {len(file_list)})")
         file_list = file_list[:args.max_files]

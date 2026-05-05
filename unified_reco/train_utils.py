@@ -1,3 +1,4 @@
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -147,7 +148,12 @@ class CondensationLoss(nn.Module):
                 
                 if is_redundant_signal.any():
                     # Highlander Penalty: Force 'Loser' signal hits to beta -> 0
-                    loss_beta += self.w_highlander * e_beta[is_redundant_signal].mean()
+                    # BCE preserves gradient at saturation (vs L1 mean which dies as
+                    # β→1), so non-alpha hits stuck near 1 actually feel pull back.
+                    redundant_betas = e_beta[is_redundant_signal].clamp(1e-6, 1 - 1e-6)
+                    loss_beta += self.w_highlander * F.binary_cross_entropy(
+                        redundant_betas, torch.zeros_like(redundant_betas)
+                    )
 
                 # --- B. Signal Alpha Loss (Seeds must be 1.0) ---
                 valid_alpha_betas = e_beta[alpha_indices][valid_obj_mask].nan_to_num(0.5).clamp(1e-6, 1-1e-6)
@@ -454,10 +460,52 @@ class PURITYLoss(nn.Module):
             loss_dict['loss_slice_pdg'] = l_slice
             total_loss += w_slice * l_slice
             
-        # 3. ATAR Trigger Slice Loss (Phase 9)
+        # 3. ATAR Trigger Slice Loss (Phase 9) — role-based attachment.
+        # Replaces per-slice BCE: for each non-anchor slice, the head outputs
+        # a distribution over {none, μ-in-chain, e-in-chain}. The anchor pion
+        # is given (not predicted) and skipped from the CE term. A listwise
+        # composition penalty enforces at most one μ and at most one e per
+        # event, which is what couples the per-slice predictions at loss time.
         w_trigger_slice = self.config.get('w_atar_trigger_slice', 0.0)
-        if w_trigger_slice > 0.0 and 'atar_trigger_logits' in outputs and 'tar_slice_trigger' in targets:
-            l_trigger_slice = self.bce_logits(outputs['atar_trigger_logits'], targets['tar_slice_trigger'])
+        if (w_trigger_slice > 0.0
+                and 'atar_role_logits' in outputs
+                and 'tar_slice_role' in targets):
+            role_logits = outputs['atar_role_logits']                # [N_valid, 3]
+            role_targets = targets['tar_slice_role'].long()          # [N_valid]
+            is_anchor = outputs.get('atar_anchor_slice_mask',
+                                    torch.zeros(role_logits.size(0),
+                                                dtype=torch.bool,
+                                                device=role_logits.device))
+            slice_event_idx = outputs.get('atar_slice_event_idx')     # [N_valid]
+
+            non_anchor = ~is_anchor
+            if non_anchor.any() and role_targets.numel() == role_logits.size(0):
+                l_role_ce = F.cross_entropy(
+                    role_logits[non_anchor], role_targets[non_anchor]
+                )
+            else:
+                l_role_ce = role_logits.new_zeros(())
+
+            # Composition penalty: at most ONE μ and ONE e per event.
+            if slice_event_idx is not None and slice_event_idx.numel() > 0:
+                role_probs = F.softmax(role_logits, dim=-1)          # [N_valid, 3]
+                num_events = int(slice_event_idx.max().item()) + 1
+                mu_sum = role_logits.new_zeros(num_events)
+                e_sum  = role_logits.new_zeros(num_events)
+                mu_sum.index_add_(0, slice_event_idx, role_probs[:, 1])
+                e_sum .index_add_(0, slice_event_idx, role_probs[:, 2])
+                l_composition = (
+                    F.relu(mu_sum - 1.0).pow(2).mean()
+                    + F.relu(e_sum - 1.0).pow(2).mean()
+                )
+            else:
+                l_composition = role_logits.new_zeros(())
+
+            lambda_comp = self.config.get('lambda_composition', 0.2)
+            l_trigger_slice = l_role_ce + lambda_comp * l_composition
+
+            loss_dict['loss_role_ce'] = l_role_ce
+            loss_dict['loss_composition'] = l_composition
             loss_dict['loss_trigger_slice'] = l_trigger_slice
             total_loss += w_trigger_slice * l_trigger_slice
         
@@ -507,6 +555,16 @@ class PURITYLoss(nn.Module):
                 l_angle = l_cosine
                 loss_dict['loss_positron_angle'] = l_angle
                 total_loss += w_angle * l_angle
+
+        # 4b. Has-trigger-positron (per-graph binary)
+        w_htp = self.config.get('w_has_trigger_positron', 0.0)
+        if w_htp > 0.0 and 'has_trigger_positron_logits' in outputs:
+            tgt = batch.has_trigger_positron.float().view(-1)
+            l_htp = F.binary_cross_entropy_with_logits(
+                outputs['has_trigger_positron_logits'], tgt
+            )
+            loss_dict['loss_has_trigger_positron'] = l_htp
+            total_loss += w_htp * l_htp
 
 
         # --- Edge Classification Loss ---
@@ -561,19 +619,48 @@ class PURITYLoss(nn.Module):
                 
             # Add to the global backpropagation total
             total_loss += w_lyso * l_cond
-        
+
+        # --- Dead-material energy regression (post-hoc, detached) ---
+        w_dead = self.config.get('w_dead_energy', 0.0)
+        if (w_dead > 0.0
+                and 'dead_energy_log_pred' in outputs
+                and 'tar_dead_E' in targets):
+            log_pred = outputs['dead_energy_log_pred']
+            log_true = torch.log1p(targets['tar_dead_E'].clamp(min=0.0))
+            log6 = math.log(6.0)
+            diff = (log_pred - log_true).clamp(min=-log6, max=log6)
+            sq = diff.pow(2)
+
+            # Mask: zero loss when predicted polar angle > 130° or no
+            # triggering positron (htp_rule == 0).
+            mask = torch.ones_like(sq)
+            es = outputs.get('event_summary', {})
+            polar = es.get('positron_polar_angle')
+            if polar is not None:
+                mask = mask * (polar < math.radians(130.0)).float()
+            htp_rule = outputs.get('has_trigger_positron_rule')
+            if htp_rule is not None:
+                mask = mask * (htp_rule > 0.5).float()
+
+            denom = mask.sum().clamp(min=1.0)
+            l_dead = (sq * mask).sum() / denom
+
+            loss_dict['loss_dead_energy'] = l_dead
+            total_loss += w_dead * l_dead
+
         # --- Event Synthesis Loss ---
         w_event = self.config.get('w_event_builder', 0.0)
         if w_event > 0.0 and 'unified_event_logits' in outputs and batch is not None:
             # Call the new energy-weighted broadcast BCE
             l_event = event_builder_loss(outputs, batch)
-            
-            # If the loss returned a valid gradient tensor
+
+            # Always log the value (works in train and inference_mode);
+            # only add to total_loss when grad is available (training).
+            loss_dict['L_event_builder'] = (
+                l_event.item() if hasattr(l_event, 'item') else float(l_event)
+            )
             if l_event.requires_grad:
                 total_loss += w_event * l_event
-                loss_dict['L_event_builder'] = l_event.item()
-            else:
-                loss_dict['L_event_builder'] = 0.0
 
         loss_dict['loss_total'] = total_loss
         return total_loss, loss_dict
@@ -592,6 +679,14 @@ def format_targets_from_batch(batch):
     # Per-slice trigger flag (Phase 9 target)
     if hasattr(batch, 'atar_slice_trigger_target') and batch.atar_slice_trigger_target is not None:
         targets['tar_slice_trigger'] = batch.atar_slice_trigger_target.float()
+
+    # Per-slice role in the triggering chain (0 = none, 1 = μ, 2 = e⁺).
+    if hasattr(batch, 'atar_slice_role_target') and batch.atar_slice_role_target is not None:
+        targets['tar_slice_role'] = batch.atar_slice_role_target.long()
+
+    # Per-event truth dead-material energy (MeV).
+    if hasattr(batch, 'dead_E_target') and batch.dead_E_target is not None:
+        targets['tar_dead_E'] = batch.dead_E_target.float().view(-1)
     
     # Node Level Targets
     if hasattr(batch, 'atar_node_pdg_target') and batch.atar_node_pdg_target is not None:

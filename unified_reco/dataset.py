@@ -269,9 +269,18 @@ class PURITYDataset(Dataset):
             slice_targets = []
             multi_event_targets = []
             slice_trigger_targets = []
+            # Per-slice role in the triggering decay chain:
+            #   0 = none (not in chain, or is the anchor pion itself)
+            #   1 = muon of the triggering chain
+            #   2 = positron of the triggering chain
+            slice_role_targets = []
+            # Per-slice mean time, used to pick the earliest triggering pion as anchor.
+            slice_mean_t_per_slice = []
+            # Track which (local) slices are candidate triggering pions.
+            trig_pion_candidate_local_idx = []
             s_starts = []
             s_stops = []
-            
+
             # Bitmasks for categorization
             # PION (1<<0), MUON (1<<1), POSI (1<<2)
             is_trigger_all = (atar_origin == 0)
@@ -291,6 +300,12 @@ class PURITYDataset(Dataset):
                 # Per-slice trigger flag: 1 if slice contains ANY trigger-origin hits
                 has_trigger = float(np.any(s_origins == 0))
                 slice_trigger_targets.append(has_trigger)
+
+                # Per-slice mean time (for picking the earliest-pion anchor).
+                s_times_local = atar_slice_mean_t[s_mask_local]
+                slice_mean_t_per_slice.append(
+                    float(np.mean(s_times_local)) if len(s_times_local) > 0 else 0.0
+                )
 
                 # 2. Identify refined hits for slice-level targets (EXACT logic)
                 s_trigger_mask = is_trigger_all[s_mask_local]
@@ -332,7 +347,24 @@ class PURITYDataset(Dataset):
                     s_pdg_out = torch.zeros(3, dtype=torch.float)
                     
                 slice_targets.append(s_pdg_out)
-                
+
+                # Role in the triggering chain (only for slices with has_trigger=1).
+                # PDG priority: pion > muon > positron (matches the refinement above).
+                # Pion slices are anchor candidates — role is none for them (0); anchor
+                # identity is carried separately as atar_triggering_pion_slice.
+                if has_trigger > 0.5:
+                    if s_pdg_out[0] > 0.5:          # π — anchor candidate
+                        slice_role_targets.append(0)
+                        trig_pion_candidate_local_idx.append(s_idx)
+                    elif s_pdg_out[1] > 0.5:        # μ
+                        slice_role_targets.append(1)
+                    elif s_pdg_out[2] > 0.5:        # e⁺ (MIP)
+                        slice_role_targets.append(2)
+                    else:
+                        slice_role_targets.append(0)
+                else:
+                    slice_role_targets.append(0)
+
                 # REQ 3: Priority-based Endpoints
                 s_t = atar_truth_t[combined_mask]
                 s_x = atar_x_raw[combined_mask]
@@ -360,6 +392,18 @@ class PURITYDataset(Dataset):
             data.atar_slice_trigger_target = torch.tensor(slice_trigger_targets, dtype=torch.float)
             data.atar_slice_start_target = torch.tensor(s_starts, dtype=torch.float) if len(s_starts) > 0 else torch.zeros((0, 3), dtype=torch.float)
             data.atar_slice_stop_target = torch.tensor(s_stops, dtype=torch.float) if len(s_stops) > 0 else torch.zeros((0, 3), dtype=torch.float)
+            data.atar_slice_role_target = torch.tensor(slice_role_targets, dtype=torch.long)
+
+            # Triggering-pion anchor: among candidate (trigger + pion) slices, pick
+            # the one with the earliest (smallest) slice mean time. Stored as the
+            # LOCAL slice index within this event's sorted unique slices. -1 if no
+            # candidate (background-only event, or pion invisible in ATAR).
+            if len(trig_pion_candidate_local_idx) > 0:
+                cand_times = [slice_mean_t_per_slice[i] for i in trig_pion_candidate_local_idx]
+                anchor_idx = int(trig_pion_candidate_local_idx[int(np.argmin(cand_times))])
+            else:
+                anchor_idx = -1
+            data.atar_triggering_pion_slice = torch.tensor([anchor_idx], dtype=torch.long)
             
             num_slices = len(unique_atar_slices)
             
@@ -379,6 +423,8 @@ class PURITYDataset(Dataset):
             data.atar_true_event_id = torch.zeros(0, dtype=torch.long)  # Always present
             data.atar_slice_stop_target = torch.zeros((0, 3), dtype=torch.float)
             data.atar_angle_target = torch.zeros((0, 3), dtype=torch.float)
+            data.atar_slice_role_target = torch.zeros(0, dtype=torch.long)
+            data.atar_triggering_pion_slice = torch.tensor([-1], dtype=torch.long)
         
         # Pion Stop Targets (Global per event)
         pion_x = row.get('truth_pion_stop_x', 0.0)
@@ -388,6 +434,10 @@ class PURITYDataset(Dataset):
         data.atar_pion_stop_target = pstops.unsqueeze(0).repeat(num_slices if n_atar > 0 else 0, 1)
             
         data.positron_initial_energy_target = torch.tensor([row.get('truth_positron_energy', 0.0)], dtype=torch.float)
+
+        # Truth dead-material energy loss (positron + descendants only).
+        # Carries through from root_to_parquet → pileup_mixer.
+        data.dead_E_target = torch.tensor([float(row.get('dead_E', 0.0))], dtype=torch.float)
         
         # Object Condensation LYSO Targets
         if n_lyso > 0 and 'lyso_origin' in row:
@@ -443,8 +493,30 @@ class PURITYDataset(Dataset):
         if n_atar > 0:
             is_trigger = (np.array(atar_origin) == 0)
             is_positron = (np.array(atar_pdg, dtype=int) & POSITRON_BIT) > 0
-            data.has_trigger_positron = torch.tensor(float(np.any(is_trigger & is_positron)))
+            data.has_trigger_positron = torch.tensor([float(np.any(is_trigger & is_positron))])
         else:
-            data.has_trigger_positron = torch.tensor(0.0)
+            data.has_trigger_positron = torch.tensor([0.0])
+
+        # --- Pie-tagger targets (PURITYTailModel) ---
+        # Per-graph scalars use [1] shape so PyG batches them into [B] cleanly.
+        # Per-hit labels are over ATAR hits only, matching the head's feature space.
+        MUON_BIT = 2  # 0b000010
+        data.is_pie_target         = torch.tensor(
+            [float(row.get('truth_is_pie', 0))], dtype=torch.float)
+        data.muon_present_target   = torch.tensor(
+            [float(row.get('truth_has_muon', 0))], dtype=torch.float)
+        data.pileup_present_target = torch.tensor(
+            [float(row.get('truth_has_atar_pileup', 0))], dtype=torch.float)
+
+        if n_atar > 0:
+            atar_pdg_arr = np.array(atar_pdg, dtype=int)
+            atar_origin_arr = np.array(atar_origin, dtype=int)
+            data.muon_hit_target   = torch.tensor(
+                ((atar_pdg_arr & MUON_BIT) > 0).astype(np.float32))
+            data.pileup_hit_target = torch.tensor(
+                (atar_origin_arr > 0).astype(np.float32))
+        else:
+            data.muon_hit_target   = torch.zeros(0, dtype=torch.float)
+            data.pileup_hit_target = torch.zeros(0, dtype=torch.float)
 
         return data

@@ -1,3 +1,43 @@
+"""
+Mix unmixed PURITY parquets (from root_to_parquet.py) into per-event
+events with realistic pileup and intrinsic LYSO radioactivity.
+
+Each output row contains:
+  - The triggering event's hits (origin=0)
+  - Optional pileup overlay events from the Michel pool (origin=1, 2, ...)
+  - Optional LYSO self-radioactivity hits (origin=-1, pdg=OTHER)
+  - Truth kinematics + per-event scalars (dead_E, atar_posE, live_E) from
+    the triggering event ONLY. Pileup and radioactivity do not contribute
+    to those scalars.
+
+Usage:
+    python pileup_mixer.py --michel /path/to/unmixed_michel.parquet \\
+                           --pie    /path/to/unmixed_pie.parquet \\
+                           --output /path/to/out.parquet \\
+                           --num_events N \\
+                           --mode {michel|pie|mixed} \\
+                           [--pie_mix_fraction F] [--trigger_gap_ns G] \\
+                           [--biased_fraction F] [--biased_sigma S] \\
+                           [--cal_only_fraction F] [--radio_rate HZ] \\
+                           [--enforce_window]
+
+Examples:
+    # 50k mixed events with default Poisson pileup (lambda=0.24) and
+    # ¹⁷⁶Lu radioactivity at 20 MHz:
+    python pileup_mixer.py --michel unmixed_michel_train.parquet \\
+                           --pie    unmixed_pie_train.parquet \\
+                           --output mixed_train.parquet \\
+                           --num_events 50000 --mode mixed --pie_mix_fraction 0.2
+
+    # Pure Pienu eval set (no biased pileup, default radioactivity):
+    python pileup_mixer.py --michel unmixed_michel_eval.parquet \\
+                           --pie    unmixed_pie_eval.parquet \\
+                           --output pie_eval.parquet \\
+                           --num_events 100000 --mode pie
+
+For a higher-level driver that wraps this for the standard train/val/eval
+split, see generate_benchmarks.py.
+"""
 import numpy as np
 import pandas as pd
 import pyarrow as pa
@@ -113,30 +153,74 @@ class PileupMixer:
         }
         return lyso_dict
 
-    def generate_batch(self, num_events, mode='michel', biased_fraction=0.0, biased_sigma=2.0, 
-                       cal_only_fraction=0.0, radio_rate=2e7, enforce_window=False):
-        
-        pool = self.michel_df if mode == 'michel' else self.pie_df
-        if pool is None:
-            raise ValueError(f"Data for mode {mode} not loaded.")
-            
+    def generate_batch(self, num_events, mode='michel', biased_fraction=0.0, biased_sigma=2.0,
+                       cal_only_fraction=0.0, radio_rate=2e7, enforce_window=False,
+                       pie_mix_fraction=0.5, trigger_gap_ns=2.0, max_reroll=16):
+
+        if mode == 'mixed':
+            if self.michel_df is None or self.pie_df is None:
+                raise ValueError("Mixed mode requires both michel_df and pie_df.")
+        else:
+            pool = self.michel_df if mode == 'michel' else self.pie_df
+            if pool is None:
+                raise ValueError(f"Data for mode {mode} not loaded.")
+
         out_rows = []
-        
+
         for _ in tqdm(range(num_events), desc=f"Mixing {mode}"):
-            # 1. Main Event (with optional window enforcement retry)
-            for attempt in range(8):
+            # Per-event pool selection for mixed mode
+            if mode == 'mixed':
+                use_pie = np.random.random() < pie_mix_fraction
+                pool = self.pie_df if use_pie else self.michel_df
+                event_mode = 'pie' if use_pie else 'michel'
+            else:
+                event_mode = mode
+
+            # 1. Main Event: reroll until 2 ns trigger-gap cut passes (always on)
+            # and, if enforce_window, positron survives the time window.
+            main_row = None
+            for attempt in range(max_reroll):
                 idx = np.random.randint(len(pool))
-                main_row = pool.iloc[idx]
-                if not enforce_window:
-                    break
-                # Only check Positron survival in window [-300, 500]
-                a_temp, _ = extract_hits(main_row, POSITRON, 0, 0.0)
-                if len(a_temp['x']) > 0:
-                    break
-            
+                cand = pool.iloc[idx]
+
+                # Trigger-gap cut: earliest POSITRON time must be >= trigger_gap_ns
+                # after latest PION time. Prefer atar_truth_t; fall back to atar_t
+                # (smeared observed time, ~200 ps resolution — fine against 2 ns cut).
+                cand_pdgs = np.array(cand['atar_pdg'], dtype=int)
+                if 'atar_truth_t' in cand:
+                    cand_tt = np.array(cand['atar_truth_t'])
+                    if np.all(cand_tt == 0):  # truth_t stored but unfilled
+                        cand_tt = np.array(cand['atar_t'])
+                else:
+                    cand_tt = np.array(cand['atar_t'])
+                pos_m = (cand_pdgs & POSITRON) > 0
+                pion_m = (cand_pdgs & PION) > 0
+                if pos_m.any() and pion_m.any():
+                    if cand_tt[pos_m].min() - cand_tt[pion_m].max() < trigger_gap_ns:
+                        continue
+
+                if enforce_window:
+                    a_temp, _ = extract_hits(cand, POSITRON, 0, 0.0)
+                    if len(a_temp['x']) == 0:
+                        continue
+
+                main_row = cand
+                break
+
+            if main_row is None:
+                # Exhausted rerolls: fall back to last candidate (extreme edge case)
+                main_row = cand
+
             # Kinematics from Main Event
             out_row = {k: main_row[k] for k in main_row.keys() if k.startswith('truth_')}
-            out_row['event_type'] = 0 if mode == 'michel' else 1
+            out_row['event_type'] = 0 if event_mode == 'michel' else 1
+
+            # Per-event truth energy scalars from the triggering event only.
+            # Pileup event contributions are NOT aggregated here — these are
+            # strictly the triggering positron's (and its daughters') energy.
+            for _scalar_col in ('dead_E', 'atar_posE', 'live_E'):
+                if _scalar_col in main_row:
+                    out_row[_scalar_col] = float(main_row[_scalar_col])
             
             atar_hits = {k: [] for k in ['x', 'y', 'z', 't', 'truth_t', 'E', 'view', 'pdg', 'slice_id', 'slice_mean_t', 'origin']}
             lyso_hits = {k: [] for k in ['x', 'y', 'z', 't', 'E', 'pdg', 'slice_id', 'slice_mean_t', 'origin']}
@@ -156,6 +240,35 @@ class PileupMixer:
                 
             merge_extracted(atar_hits, a_main)
             merge_extracted(lyso_hits, l_main)
+
+            # Did any positron-tagged hit (ATAR OR LYSO) from the main event survive
+            # the [-300, 500] ns mixer window? If not, the triggering positron is
+            # effectively invisible in this mixed event, so zero out the truth
+            # energy scalars copied above.
+            _main_atar_pdg = np.array(a_main['pdg'], dtype=int)
+            _main_lyso_pdg = np.array(l_main['pdg'], dtype=int)
+            _main_atar_pos_mask = ((_main_atar_pdg & POSITRON) > 0) if len(_main_atar_pdg) > 0 else np.zeros(0, dtype=bool)
+            _main_lyso_pos_mask = ((_main_lyso_pdg & POSITRON) > 0) if len(_main_lyso_pdg) > 0 else np.zeros(0, dtype=bool)
+            positron_in_window = bool(_main_atar_pos_mask.any() or _main_lyso_pos_mask.any())
+            if not positron_in_window:
+                for _scalar_col in ('dead_E', 'atar_posE', 'live_E'):
+                    if _scalar_col in out_row:
+                        out_row[_scalar_col] = 0.0
+
+            # Truth time of the triggering positron — earliest truth-t among
+            # the surviving positron-tagged hits (ATAR preferred, LYSO fallback).
+            # Stored on the mixed row directly so downstream code doesn't need
+            # to re-derive it from per-hit arrays + origin filters.
+            _truth_pos_t = -1000.0
+            if positron_in_window:
+                cands = []
+                if _main_atar_pos_mask.any() and len(a_main['truth_t']) > 0:
+                    cands.append(np.min(np.array(a_main['truth_t'])[_main_atar_pos_mask]))
+                if _main_lyso_pos_mask.any() and len(l_main['t']) > 0:
+                    cands.append(np.min(np.array(l_main['t'])[_main_lyso_pos_mask]))
+                if cands:
+                    _truth_pos_t = float(np.min(cands))
+            out_row['truth_positron_t'] = _truth_pos_t
 
             # Pileup Selection
             rand_val = np.random.random()
@@ -335,6 +448,21 @@ class PileupMixer:
             
             out_row['truth_multi_event_atar_slice'] = multi_origin_slice
 
+            # Pie-tagger truth labels (energy-blind, ATAR-only).
+            # is_pie:           main chain came from the pie pool
+            # has_muon:         any ATAR hit (main OR pileup) carries the muon bit
+            # has_atar_pileup:  any ATAR hit comes from a non-trigger origin
+            #                   (LYSO-only / cal-only pileup is excluded by
+            #                    design — the head can't see LYSO so the label
+            #                    must match the feature space)
+            atar_pdg_arr = (np.array(atar_hits['pdg'], dtype=int)
+                            if len(atar_hits['pdg']) else np.zeros(0, dtype=int))
+            atar_origin_arr = (np.array(atar_hits['origin'], dtype=int)
+                               if len(atar_hits['origin']) else np.zeros(0, dtype=int))
+            out_row['truth_is_pie']          = int(event_mode == 'pie')
+            out_row['truth_has_muon']        = int(((atar_pdg_arr & MUON) > 0).any())
+            out_row['truth_has_atar_pileup'] = int((atar_origin_arr > 0).any())
+
             # Finalize this mixed event into column schema
             for k in atar_hits.keys():
                 out_col = 'atar_slice' if k == 'slice_id' else f'atar_{k}'
@@ -354,7 +482,9 @@ if __name__ == "__main__":
     parser.add_argument("--pie", type=str, default=None, help="Path to PiE Parquet")
     parser.add_argument("--output", type=str, required=True, help="Output mixed Parquet")
     parser.add_argument("--num_events", type=int, default=10)
-    parser.add_argument("--mode", type=str, default='michel', choices=['michel', 'pie'])
+    parser.add_argument("--mode", type=str, default='michel', choices=['michel', 'pie', 'mixed'])
+    parser.add_argument("--pie_mix_fraction", type=float, default=0.5, help="Fraction of pie main events in mixed mode")
+    parser.add_argument("--trigger_gap_ns", type=float, default=2.0, help="Minimum allowed gap (ns) between pion stop and triggering positron")
     parser.add_argument("--biased_fraction", type=float, default=0.0, help="Fraction of events to use biased pileup (0.0=Off)")
     parser.add_argument("--biased_sigma", type=float, default=2.0, help="Gaussian spread for biased pileup separation (ns)")
     parser.add_argument("--cal_only_fraction", type=float, default=0.0, help="Fraction of events to use calorimeter-only biased pileup")
@@ -367,12 +497,14 @@ if __name__ == "__main__":
         parser.error("The sum of --biased_fraction and --cal_only_fraction cannot exceed 1.0")
     
     mixer = PileupMixer(args.michel, args.pie)
-    mixed_df = mixer.generate_batch(args.num_events, mode=args.mode, 
-                                    biased_fraction=args.biased_fraction, 
-                                    biased_sigma=args.biased_sigma, 
+    mixed_df = mixer.generate_batch(args.num_events, mode=args.mode,
+                                    biased_fraction=args.biased_fraction,
+                                    biased_sigma=args.biased_sigma,
                                     cal_only_fraction=args.cal_only_fraction,
                                     radio_rate=args.radio_rate,
-                                    enforce_window=args.enforce_window)
+                                    enforce_window=args.enforce_window,
+                                    pie_mix_fraction=args.pie_mix_fraction,
+                                    trigger_gap_ns=args.trigger_gap_ns)
     
     print(f"Writing {args.num_events} mixed events to {args.output}")
     table = pa.Table.from_pandas(mixed_df)
