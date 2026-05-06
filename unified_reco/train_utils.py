@@ -508,7 +508,92 @@ class PURITYLoss(nn.Module):
             loss_dict['loss_composition'] = l_composition
             loss_dict['loss_trigger_slice'] = l_trigger_slice
             total_loss += w_trigger_slice * l_trigger_slice
-        
+
+        # 3.5 Trigger-positron time-spread loss
+        # Physics: the trigger positron is a single track confined to one slice
+        # with intrinsic spread ~1 ns. If the model tags hits across multiple
+        # slices as the trigger positron (the pile-up failure mode), the
+        # weighted std over those tagged hits blows up.
+        #
+        # Per event:
+        #   w[i]        = P(positron-MIP)[i] × P(slice trigger)[i]   (per-hit weight)
+        #   std         = sqrt( Σ w (t - μ)² / Σ w )                  (weighted std in ns)
+        #   avg_trig    = mean(P(slice trigger))                      (per-event scalar)
+        #   penalty     = log(1 + relu(std - threshold) × avg_trig)
+        #
+        # avg_trig auto-gates events where the model is uncertain that any
+        # trigger chain is present. relu inside log keeps the argument in
+        # [0, ∞), so log1p never goes negative or NaN.
+        w_spread = self.config.get('w_time_spread', 0.0)
+        if (w_spread > 0.0 and batch is not None
+                and 'atar_node_pdg' in outputs
+                and 'atar_hit_trigger_prob' in outputs):
+            x = batch.x
+            is_atar = (x[:, 5] > 0.5) | (x[:, 6] > 0.5)
+            if is_atar.any():
+                t_atar = (x[is_atar, 4] * 500.0)                  # ns (NORM_T_ATAR=500)
+                b_atar = batch.batch[is_atar]                      # [N_atar]
+                B_total = int(batch.batch.max().item()) + 1
+
+                node_pdg = outputs['atar_node_pdg']                # [N_atar, 3] logits
+                # Only the positron-MIP class (column 2). Sigmoid since the
+                # head is a 3-bit BCE-style classifier, not a softmax over classes.
+                pos_p = torch.sigmoid(node_pdg[:, 2])              # [N_atar]
+                hit_trig = outputs['atar_hit_trigger_prob']        # [N_atar]
+
+                # Hard floors on both per-hit trigger probability and per-hit
+                # MIP probability. A hit only contributes to the spread if the
+                # model is at least mildly confident that BOTH (a) its slice is
+                # part of the trigger chain and (b) the hit itself is a MIP/
+                # positron. This kills variance contribution from confidently-
+                # non-trigger hits and from hits whose residual sigmoid floor
+                # P(MIP) on a true-π/μ track was being amplified by (t-mean)².
+                trig_floor = float(self.config.get(
+                    'time_spread_trig_floor', 0.25))
+                mip_floor = float(self.config.get(
+                    'time_spread_mip_floor', 0.25))
+                trig_gate = (hit_trig > trig_floor).float()        # [N_atar] 0/1
+                mip_gate  = (pos_p   > mip_floor).float()          # [N_atar] 0/1
+                hit_trig_eff = hit_trig * trig_gate                # [N_atar]
+                pos_p_eff    = pos_p   * mip_gate                  # [N_atar]
+
+                # Per-event average slice-trigger probability (gating factor).
+                # Same trig gate applied so events with no slice above the floor
+                # contribute nothing.
+                sum_trig   = torch.zeros(B_total, device=x.device)
+                count_atar = torch.zeros(B_total, device=x.device)
+                sum_trig  .index_add_(0, b_atar, hit_trig_eff)
+                count_atar.index_add_(0, b_atar, torch.ones_like(hit_trig))
+                avg_trig_per_event = sum_trig / count_atar.clamp(min=1.0)  # [B_total]
+
+                threshold_ns = float(self.config.get(
+                    'time_spread_thresh_ns', 1.0))
+
+                # Per-hit weight = (gated MIP prob) × (gated trigger-slice prob).
+                w = pos_p_eff * hit_trig_eff                       # [N_atar]
+
+                # Σw, Σ(w·t) per event
+                sum_w  = torch.zeros(B_total, device=x.device)
+                sum_wt = torch.zeros(B_total, device=x.device)
+                sum_w .index_add_(0, b_atar, w)
+                sum_wt.index_add_(0, b_atar, w * t_atar)
+
+                sum_w_safe = sum_w.clamp(min=1e-3)
+                mean_t_per_event = sum_wt / sum_w_safe             # [B_total]
+                mean_t_per_hit = mean_t_per_event[b_atar]          # [N_atar]
+
+                diff_sq = (t_atar - mean_t_per_hit) ** 2
+                sum_w_diff = torch.zeros(B_total, device=x.device)
+                sum_w_diff.index_add_(0, b_atar, w * diff_sq)
+                var_t  = sum_w_diff / sum_w_safe
+                std_t  = torch.sqrt(var_t.clamp(min=0.0) + 1e-6)   # [B_total] ns
+
+                excess = F.relu(std_t - threshold_ns)
+                penalty = torch.log1p(excess * avg_trig_per_event)
+                l_time_spread = penalty.mean()
+                loss_dict['loss_time_spread'] = l_time_spread
+                total_loss += w_spread * l_time_spread
+
         # 3A. Kinematic Pion Stop (Phase 10 — per-graph regression)
         w_pion = self.config.get('w_pion_kinematics', 0.0)
         if w_pion > 0.0 and 'atar_pion_stop' in outputs and 'tar_pion_stop_xyz' in targets:

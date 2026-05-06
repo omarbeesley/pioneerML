@@ -1485,7 +1485,7 @@ class PURITYHybridModel(nn.Module):
             # Zeroing seed_β here propagates through affinity/pool/cluster_energy_sum
             # naturally — the existing seed_has_weight check (w_sum > 1e-4) will then
             # mark these seeds invalid downstream.
-            seed_beta_threshold = 0.5
+            seed_beta_threshold = 0.25
             seed_beta = seed_beta * (seed_beta > seed_beta_threshold).float()
             
             dists = torch.cdist(g_coords, seed_coords) # [B, N_max, actual_k]
