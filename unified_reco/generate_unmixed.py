@@ -17,10 +17,9 @@ import os
 import subprocess
 import sys
 
-DATA_DIR = "/mnt/c/Users/obbee/research/notebooks/ML/data/purity"
-ROOT_BASE = "/mnt/e/global_ai_recon"
-ROOT_TO_PARQUET = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                               "root_to_parquet.py")
+DATA_DIR = "/data/nvme0/prod_ml_data/unmixed_parquets/"
+ROOT_BASE = "/data/nvme0/root_files/"
+ROOT_TO_PARQUET = "/home/obeesley/pioneerML/unified_reco/root_to_parquet.py"
 
 JOBS = {
     "pie_train":    dict(channel="pie",    split="train", out_name="unmixed_pie_train.parquet"),
@@ -64,11 +63,11 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--only", choices=list(JOBS.keys()), default=None,
                         help="Run a single job instead of all six.")
-    parser.add_argument("--max_train", type=int, default=200000,
+    parser.add_argument("--max_train", type=int, default=10000000,
                         help="Max events for the train splits.")
-    parser.add_argument("--max_val",   type=int, default=20000,
+    parser.add_argument("--max_val",   type=int, default=500000,
                         help="Max events for the val splits.")
-    parser.add_argument("--max_eval",  type=int, default=100000,
+    parser.add_argument("--max_eval",  type=int, default=1000000,
                         help="Max events for the eval splits.")
     parser.add_argument("--output_dir", type=str, default=DATA_DIR,
                         help="Directory to write all 6 parquet files.")

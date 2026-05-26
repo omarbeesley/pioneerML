@@ -28,8 +28,8 @@ import pyarrow.parquet as pq
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from unified_reco.pileup_mixer import PileupMixer
 
-DATA_DIR = "/mnt/c/Users/obbee/research/notebooks/ML/data/purity"
-RECO_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = "/data/nvme0/prod_ml_data/unmixed_parquets/"
+RECO_DIR = "/data/nvme0/prod_ml_data/mixed_parquets/"
 
 # Per-split unmixed parquets produced by generate_unmixed.py
 SPLIT_FILES = {
@@ -49,7 +49,7 @@ SPLIT_FILES = {
 
 # Pileup-mixer settings shared by training and validation (the two 'mixed' jobs).
 TRAIN_VAL_OPTS = dict(
-    biased_fraction=0.0,
+    biased_fraction=0.05,
     biased_sigma=5.0,
     cal_only_fraction=0.1,
     radio_rate=2e7,
@@ -78,28 +78,28 @@ def _job_specs(args):
             mode="mixed",
             num_events=args.num_train,
             opts=TRAIN_VAL_OPTS,
-            out=os.path.join(RECO_DIR, "training_5_02", "data.parquet"),
+            out=os.path.join(RECO_DIR, "training_5_11", "data.parquet"),
         ),
         "validation": dict(
             split="val",
             mode="mixed",
             num_events=args.num_val,
             opts=TRAIN_VAL_OPTS,
-            out=os.path.join(RECO_DIR, "validation_5_02", "data.parquet"),
+            out=os.path.join(RECO_DIR, "validation_5_11", "data.parquet"),
         ),
         "pie": dict(
             split="eval",
             mode="pie",
             num_events=args.num_eval,
             opts=BENCHMARK_OPTS,
-            out=os.path.join(RECO_DIR, "pie_benchmark_5_02", "data.parquet"),
+            out=os.path.join(RECO_DIR, "pie_benchmark_5_11", "data.parquet"),
         ),
         "pimu": dict(
             split="eval",
             mode="michel",
             num_events=args.num_eval,
             opts=BENCHMARK_OPTS,
-            out=os.path.join(RECO_DIR, "pimu_benchmark_5_02", "data.parquet"),
+            out=os.path.join(RECO_DIR, "pimu_benchmark_5_11", "data.parquet"),
         ),
     }
 
@@ -147,9 +147,9 @@ def main():
                         choices=["training", "validation", "pie", "pimu"],
                         default=None,
                         help="Run a single job instead of all four.")
-    parser.add_argument("--num_train", type=int, default=200000)
-    parser.add_argument("--num_val",   type=int, default=20000)
-    parser.add_argument("--num_eval",  type=int, default=100000)
+    parser.add_argument("--num_train", type=int, default=10000000)
+    parser.add_argument("--num_val",   type=int, default=100000)
+    parser.add_argument("--num_eval",  type=int, default=1000000)
     parser.add_argument("--chunk_size", type=int, default=100_000,
                         help="Events per parquet row-group; controls peak RAM.")
     args = parser.parse_args()

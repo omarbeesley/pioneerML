@@ -8,11 +8,18 @@ class PinballLoss(nn.Module):
     Robust Permutation-Invariant Endpoint Loss using Asymmetric Attenuated Pinball Loss.
     Adapted from endpoint_finder.ipynb for the PURITY architecture.
     """
-    def __init__(self, quantiles=[0.16, 0.50, 0.84], loss_scale_span=0.1, loss_scale_dir=0.1):
+    def __init__(self, quantiles=[0.16, 0.50, 0.84], loss_scale_span=0.1, loss_scale_dir=0.1,
+                 sigma_floor=1e-3):
         super().__init__()
         self.quantiles = quantiles
         self.loss_scale_span = loss_scale_span
         self.loss_scale_dir = loss_scale_dir
+        # Numerical guardrail on the predicted quantile scale -- NOT an uncertainty
+        # target. Without it the attenuated term (2*err/sigma + log sigma) rewards
+        # sigma -> 0 and its gradient explodes like 1/sigma^2, NaN-ing the shared
+        # trunk over many steps. Keep this 10-100x BELOW the healthy MeanWidth so it
+        # only bites during collapse and never inflates normal uncertainty estimates.
+        self.sigma_floor = sigma_floor
     def forward(self, preds, targets, weights=None, error_scale=1.0):
         if preds.dim() != 4 or targets.dim() != 3:
             raise ValueError("Expected preds shape [N, 2, 3, 3] and targets shape [N, 2, 3]")
@@ -38,6 +45,7 @@ class PinballLoss(nn.Module):
         sigma_total = sigma_left + sigma_right
         
         scales = torch.stack([sigma_left, sigma_total, sigma_right], dim=-1)
+        scales = scales.clamp(min=self.sigma_floor)   # block variance collapse / 1/sigma^2 blow-up
         log_scales = torch.log(scales)
         
         pos_loss = 0.0
@@ -150,13 +158,14 @@ class CondensationLoss(nn.Module):
                     # Highlander Penalty: Force 'Loser' signal hits to beta -> 0
                     # BCE preserves gradient at saturation (vs L1 mean which dies as
                     # β→1), so non-alpha hits stuck near 1 actually feel pull back.
-                    redundant_betas = e_beta[is_redundant_signal].clamp(1e-6, 1 - 1e-6)
+                    redundant_betas = e_beta[is_redundant_signal].nan_to_num(0.5).clamp(1e-6, 1 - 1e-6)
                     loss_beta += self.w_highlander * F.binary_cross_entropy(
                         redundant_betas, torch.zeros_like(redundant_betas)
                     )
 
                 # --- B. Signal Alpha Loss (Seeds must be 1.0) ---
-                valid_alpha_betas = e_beta[alpha_indices][valid_obj_mask].nan_to_num(0.5).clamp(1e-6, 1-1e-6)
+                valid_alpha_indices = alpha_indices[valid_obj_mask]
+                valid_alpha_betas = e_beta[valid_alpha_indices].nan_to_num(0.5).clamp(1e-6, 1-1e-6)
                 loss_beta += F.binary_cross_entropy(valid_alpha_betas, torch.ones_like(valid_alpha_betas))
 
 
@@ -417,9 +426,19 @@ class PURITYLoss(nn.Module):
         self.bce_logits = nn.BCEWithLogitsLoss()
         self.mse = nn.MSELoss()
         self.l1_loss = nn.L1Loss()
-        # Assuming PinballLoss and CondensationLoss are defined elsewhere
-        self.pinball = PinballLoss(quantiles=[0.16, 0.50, 0.84]) 
+        self.pinball = PinballLoss(quantiles=[0.16, 0.50, 0.84])
         self.condensation = CondensationLoss()
+
+        decorr_window = config.get('decorr_window', 10)
+        self._decorr_alpha = 1.0 / decorr_window
+        self._m0_ema = 0.0
+        self._m1_ema = 0.0
+        self._m2_ema = 0.0
+
+    def reset_decorr_ema(self):
+        self._m0_ema = 0.0
+        self._m1_ema = 0.0
+        self._m2_ema = 0.0
         
     def forward(self, outputs, targets, batch=None):
         loss_dict = {}
@@ -634,12 +653,38 @@ class PURITYLoss(nn.Module):
             if has_pos.any():
                 pred_dir = outputs['atar_positron_dir'][has_pos]
                 tar_dir = targets['tar_angle_vec_per_graph'][has_pos]
-                l_cosine = (1.0 - F.cosine_similarity(pred_dir, tar_dir, dim=1)).mean()
-                #l_mse = F.mse_loss(pred_dir, tar_dir)
-                #l_angle = l_cosine + 0.1 * l_mse
-                l_angle = l_cosine
+                l_angle = (1.0 - F.cosine_similarity(pred_dir, tar_dir, dim=1)).mean()
                 loss_dict['loss_positron_angle'] = l_angle
                 total_loss += w_angle * l_angle
+
+                # 4a. Moment decorrelation: penalize θ-dependent bias
+                w_decorr = self.config.get('w_angle_decorr', 0.0)
+                if w_decorr > 0.0 and has_pos.sum() >= 10:
+                    eps = 1e-4
+                    theta_pred = torch.acos(pred_dir[:, 2].clamp(-1 + eps, 1 - eps))
+                    theta_true = torch.acos(tar_dir[:, 2].clamp(-1 + eps, 1 - eps))
+                    residual = theta_pred - theta_true
+
+                    m0_batch = residual.mean()
+                    m1_batch = (residual * tar_dir[:, 2]).mean()
+                    cos2 = 2.0 * tar_dir[:, 2] ** 2 - 1.0
+                    m2_batch = (residual * cos2).mean()
+
+                    a = self._decorr_alpha
+                    m0_smooth = a * m0_batch + (1 - a) * self._m0_ema
+                    m1_smooth = a * m1_batch + (1 - a) * self._m1_ema
+                    m2_smooth = a * m2_batch + (1 - a) * self._m2_ema
+
+                    self._m0_ema = m0_smooth.detach().item()
+                    self._m1_ema = m1_smooth.detach().item()
+                    self._m2_ema = m2_smooth.detach().item()
+
+                    l_decorr = (m0_smooth ** 2 + m1_smooth ** 2 + m2_smooth ** 2) / a
+                    loss_dict['loss_angle_decorr'] = l_decorr.detach()
+                    loss_dict['loss_angle_decorr_m0'] = m0_smooth.detach()
+                    loss_dict['loss_angle_decorr_m1'] = m1_smooth.detach()
+                    loss_dict['loss_angle_decorr_m2'] = m2_smooth.detach()
+                    total_loss += w_decorr * l_decorr
 
         # 4b. Has-trigger-positron (per-graph binary)
         w_htp = self.config.get('w_has_trigger_positron', 0.0)

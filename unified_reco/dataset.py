@@ -153,17 +153,57 @@ class PURITYDataset(Dataset):
     Reads mixed Parquet events built from PileupMixer and automatically formats them 
     into PyG Data objects suitable for the PURITY Transformer.
     """
-    def __init__(self, parquet_path, max_hits=300):
+    def __init__(self, parquet_path, max_hits=300, max_events=None):
         super().__init__(root=None, transform=None, pre_transform=None)
-        
+
         print(f"Loading merged parquet dataset from {parquet_path}...")
-        self.df = pd.read_parquet(parquet_path)
-        
+
+        if max_events is not None:
+            # Read a random subset of row groups to bound RAM usage.
+            import pyarrow.parquet as pq
+            pf = pq.ParquetFile(parquet_path)
+            n_groups = pf.metadata.num_row_groups
+            total_rows = pf.metadata.num_rows
+
+            if max_events < total_rows:
+                # Determine how many row groups we need (read whole groups,
+                # then truncate — avoids reading the entire file).
+                group_sizes = [pf.metadata.row_group(i).num_rows for i in range(n_groups)]
+                group_indices = list(range(n_groups))
+                np.random.shuffle(group_indices)
+
+                selected_groups = []
+                accumulated = 0
+                for gi in group_indices:
+                    selected_groups.append(gi)
+                    accumulated += group_sizes[gi]
+                    if accumulated >= max_events:
+                        break
+
+                tables = [pf.read_row_group(gi) for gi in sorted(selected_groups)]
+                import pyarrow as pa
+                table = pa.concat_tables(tables)
+                del tables
+
+                # Subsample to exactly max_events if we overshot.
+                if len(table) > max_events:
+                    indices = np.sort(np.random.choice(len(table), size=max_events, replace=False))
+                    table = table.take(indices)
+
+                self.df = table.to_pandas()
+                del table
+                print(f"Sampled {max_events} of {total_rows} rows "
+                      f"({len(selected_groups)}/{n_groups} row groups).")
+            else:
+                self.df = pd.read_parquet(parquet_path)
+        else:
+            self.df = pd.read_parquet(parquet_path)
+
         # Pre-filter events with more than max_hits (OOM constraint)
         atar_len = self.df['atar_x'].apply(lambda x: len(x) if x is not None else 0)
         lyso_len = self.df['lyso_x'].apply(lambda x: len(x) if x is not None else 0)
         total_hits = atar_len + lyso_len
-        
+
         initial_len = len(self.df)
         self.df = self.df[(total_hits > 0) & (total_hits <= max_hits)].reset_index(drop=True)
         final_len = len(self.df)

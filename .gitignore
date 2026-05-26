@@ -4,3 +4,14 @@ __pycache__/
 npy_data/
 .DS_Store
 processed/
+
+# --- Output artifacts: kept out of git, snapshotted separately ---
+model_weights/
+benchmark_results/
+benchmark_results_v*/
+benchmark_plots/
+benchmark_plots_v*/
+*diagnostics*/
+
+# Claude Code harness
+.claude/

@@ -98,9 +98,44 @@ def smear_atar(energy, energy_resolution=0.15):
     smeared_energy[mask] = valid_energies + noise
     return smeared_energy
 
-def process_root_file(file_list, geoheader, atarheader, geo_lookup, output_file, max_events=None):
+
+PARQUET_NAMES = [
+    'event_id',
+    'truth_theta', 'truth_phi', 'truth_positron_energy',
+    'truth_pion_start_x', 'truth_pion_start_y', 'truth_pion_start_z',
+    'truth_pion_stop_x', 'truth_pion_stop_y', 'truth_pion_stop_z',
+    'truth_muon_start_x', 'truth_muon_start_y', 'truth_muon_start_z',
+    'truth_muon_stop_x', 'truth_muon_stop_y', 'truth_muon_stop_z',
+    'truth_positron_start_x', 'truth_positron_start_y', 'truth_positron_start_z',
+    'truth_positron_stop_x', 'truth_positron_stop_y', 'truth_positron_stop_z',
+    'atar_x', 'atar_y', 'atar_z', 'atar_t', 'atar_truth_t', 'atar_E', 'atar_view', 'atar_pdg', 'atar_slice_id',
+    'lyso_x', 'lyso_y', 'lyso_z', 'lyso_t', 'lyso_E', 'lyso_pdg',
+    'dead_E',
+    'atar_posE',
+    'live_E',
+]
+
+
+def _make_accumulator():
+    """Return a fresh dict of empty lists for event accumulation."""
+    return {name: [] for name in PARQUET_NAMES}
+
+
+def _build_table(acc):
+    """Build a PyArrow Table from an accumulator dict."""
+    arrays = []
+    for name in PARQUET_NAMES:
+        if name in ('dead_E', 'atar_posE', 'live_E'):
+            arrays.append(pa.array(acc[name], type=pa.float64()))
+        else:
+            arrays.append(pa.array(acc[name]))
+    return pa.Table.from_arrays(arrays, names=PARQUET_NAMES)
+
+
+def process_root_file(file_list, geoheader, output_file, max_events=None, shard_size=100000):
     """
     Parses a list of ROOT files and directly flattens EVERY hit sequentially into a Parquet-ready dictionary/list.
+    Flushes to disk every `shard_size` events to bound peak RAM.
     """
     chain = ROOT.TChain("sim")
     if isinstance(file_list, str):
@@ -114,52 +149,28 @@ def process_root_file(file_list, geoheader, atarheader, geo_lookup, output_file,
         entries = min(entries, max_events)
         
     print(f"Total entries to process: {entries}")
+    print(f"Shard size: {shard_size} events (flush to disk to bound RAM)")
 
-    # For Parquet conversion we want columnar arrays of primitives or PyArrow lists
-    out_event_ids = []
-    
-    # ATAR Hit Features (Ragged Arrays / Lists of floats per event)
-    out_atar_x = []
-    out_atar_y = []
-    out_atar_z = []
-    out_atar_E = []
-    out_atar_t = []
-    out_atar_truth_t = []
-    out_atar_pdg = []
-    out_atar_view = []   # 0 for XZ, 1 for YZ
-    out_atar_slice = []  # Time slice IDs for hierarchical pooling
-    
-    # LYSO Hit Features
-    out_lyso_x = []
-    out_lyso_y = []
-    out_lyso_z = []
-    out_lyso_E = []
-    out_lyso_t = []
-    out_lyso_pdg = []
-    out_lyso_slice = []
+    acc = _make_accumulator()
+    writer = None
+    schema = None
+    n_written = 0
 
-    # Per-event dead-material energy (sum of track edep in volumes that are
-    # neither ATAR nor LYSO, within the same digitization time window).
-    out_dead_E = []
-
-    # Per-event positron-only ATAR energy: sum of edep from tracks with
-    # pdg == -11 (positron) restricted to ATAR volumes.
-    out_atar_posE = []
-
-    # Per-event "live" energy = atar_posE + total lyso_E (all sensitive-material
-    # signal; excludes pion Bragg peak in ATAR and dead-material losses).
-    out_live_E = []
-    
-    # Global Physics Truths
-    out_theta_init = []
-    out_phi_init = []
-    out_positron_energy = []
-    out_pion_start_x, out_pion_start_y, out_pion_start_z = [], [], []
-    out_pion_stop_x, out_pion_stop_y, out_pion_stop_z = [], [], []
-    out_muon_start_x, out_muon_start_y, out_muon_start_z = [], [], []
-    out_muon_stop_x, out_muon_stop_y, out_muon_stop_z = [], [], []
-    out_positron_start_x, out_positron_start_y, out_positron_start_z = [], [], []
-    out_positron_stop_x, out_positron_stop_y, out_positron_stop_z = [], [], []
+    def _flush():
+        nonlocal writer, schema, n_written
+        if len(acc['event_id']) == 0:
+            return
+        table = _build_table(acc)
+        if writer is None:
+            schema = table.schema
+            writer = pq.ParquetWriter(output_file, schema)
+        else:
+            table = table.cast(schema, safe=False)
+        writer.write_table(table)
+        n_written += len(acc['event_id'])
+        print(f"    flushed {len(acc['event_id'])} events (total written: {n_written})", flush=True)
+        for k in acc:
+            acc[k].clear()
 
     for i, entry in tqdm(enumerate(chain), total=entries):
         if i >= entries: break
@@ -206,6 +217,12 @@ def process_root_file(file_list, geoheader, atarheader, geo_lookup, output_file,
         # Temporary dictionaries for temporal merging within this event
         event_hits_atar = {} # vol_id -> list of dicts: {'x':, 'y':, 'z':, 't':, 'E':, 'view':, 'pdg':}
         event_hits_lyso = {} # vol_id -> list of dicts
+
+        # Truth (unsmeared) LYSO energy per crystal, accumulated across all tracks.
+        # Used in pass 4 to subtract from GetTotalEnergyDeposit so the residual
+        # captures only genuinely untracked deposits (e.g. gammas without Geant4
+        # tracks), not smearing artifacts.
+        lyso_truth_per_crystal = {}
 
         # Accumulated dead-material energy for this event (MeV).
         evt_dead_E = 0.0
@@ -330,11 +347,17 @@ def process_root_file(file_list, geoheader, atarheader, geo_lookup, output_file,
             atar_indices = valid_indices[is_atar_lookup[valid_indices]]
             lyso_indices = valid_indices[is_lyso_lookup[valid_indices]]
 
+            # Accumulate truth (unsmeared) LYSO energy per crystal BEFORE smearing.
+            # This is used in pass 4 to compute residuals against GetTotalEnergyDeposit.
+            for idx in lyso_indices:
+                v_id = int(unique_vols[idx])
+                lyso_truth_per_crystal[v_id] = lyso_truth_per_crystal.get(v_id, 0.0) + float(sum_e[idx])
+
             # Positron-only ATAR energy: attribute this track's ATAR deposits
             # to positron accumulator iff the track is a positron (pdg -11).
             if pdg == -11 and len(atar_indices) > 0:
                 evt_atar_posE += float(sum_e[atar_indices].sum())
-            
+
             # Legacy Physical Smearing Validation (ATAR uses flat resolution)
             if len(atar_indices) > 0:
                 avg_t[atar_indices] += np.random.normal(0, 0.2, size=len(atar_indices))
@@ -418,8 +441,9 @@ def process_root_file(file_list, geoheader, atarheader, geo_lookup, output_file,
                 
                 # ATAR PROCESSING
                 if is_atar_lookup[idx]:
-                    strip_orientation = atarheader.GetChannel(v_id).GetOrientation()
-                    if strip_orientation == 2: strip_orientation = 0
+                    # Derive view from GeoHeader rotation: unrotated (psi≈0) → XZ (0),
+                    # rotated (psi≈-π/4) → YZ (1). Replaces old AtarHeader.GetChannel().
+                    strip_orientation = 0 if abs(geoheader.GetPsi(v_id)) < 0.1 else 1
                     
                     new_hit = {'x': float(ax), 'y': float(ay), 'z': float(az), 't': max(float(at), 0.05), 'truth_t': max(float(truth_t[idx]), 0.05), 'E': float(se), 'view': int(strip_orientation), 'pdg_mask': pdg_mask}
                     if v_id not in event_hits_atar: event_hits_atar[v_id] = []
@@ -434,18 +458,18 @@ def process_root_file(file_list, geoheader, atarheader, geo_lookup, output_file,
         # 4. Calorimeter Exclusive Hit Processing (e.g. Gammas)
         # Uncharged particles often don't leave Geant4 'tracks' but DO deposit in entry.calo.
         # crystal.GetTotalEnergyDeposit() returns the FULL deposit for the crystal, including
-        # contributions from tracked particles already added in pass 3. Subtract those so we
-        # only add the untracked remainder (gammas, etc.) — otherwise LYSO is double-counted.
-        tracked_per_crystal = {
-            c_id: sum(h['E'] for h in hits)
-            for c_id, hits in event_hits_lyso.items()
-        }
+        # contributions from tracked particles already added in pass 3. Subtract the TRUTH
+        # (unsmeared) energy so the residual captures only genuinely untracked deposits
+        # (gammas, etc.). Using smeared energy here would create a one-sided bias: downward
+        # smearing fluctuations produce positive residuals that get re-added, while upward
+        # fluctuations produce negative residuals that are skipped — systematically
+        # inflating the total energy.
         for crystal in entry.calo:
             edep_total = crystal.GetTotalEnergyDeposit()
             if edep_total < 1e-4: continue
 
             c_id = int(crystal.GetCaloID())
-            edep_residual = edep_total - tracked_per_crystal.get(c_id, 0.0)
+            edep_residual = edep_total - lyso_truth_per_crystal.get(c_id, 0.0)
             if edep_residual < 1e-4: continue  # fully accounted for by tracked hits
 
             # Replicate temporal mask cut and explicitly clip for log-scale plotting
@@ -549,103 +573,61 @@ def process_root_file(file_list, geoheader, atarheader, geo_lookup, output_file,
                     evt_lyso_slice[i - atar_len] = slice_id
 
         # We append regardless of length to maintain strict 1:1 event indexing
-        out_event_ids.append(i)
+        acc['event_id'].append(i)
         
-        out_atar_x.append(evt_atar_x)
-        out_atar_y.append(evt_atar_y)
-        out_atar_z.append(evt_atar_z)
-        out_atar_E.append(evt_atar_E)
-        out_atar_t.append(evt_atar_t)
-        out_atar_truth_t.append(evt_atar_truth_t)
-        out_atar_view.append(evt_atar_view)
-        out_atar_pdg.append(evt_atar_pdg)
-        out_atar_slice.append(evt_atar_slice)
-        
-        out_lyso_x.append(evt_lyso_x)
-        out_lyso_y.append(evt_lyso_y)
-        out_lyso_z.append(evt_lyso_z)
-        out_lyso_E.append(evt_lyso_E)
-        out_lyso_t.append(evt_lyso_t)
-        out_lyso_pdg.append(evt_lyso_pdg)
-        out_lyso_slice.append(evt_lyso_slice)
+        acc['atar_x'].append(evt_atar_x)
+        acc['atar_y'].append(evt_atar_y)
+        acc['atar_z'].append(evt_atar_z)
+        acc['atar_E'].append(evt_atar_E)
+        acc['atar_t'].append(evt_atar_t)
+        acc['atar_truth_t'].append(evt_atar_truth_t)
+        acc['atar_view'].append(evt_atar_view)
+        acc['atar_pdg'].append(evt_atar_pdg)
+        acc['atar_slice_id'].append(evt_atar_slice)
 
-        out_dead_E.append(float(evt_dead_E))
+        acc['lyso_x'].append(evt_lyso_x)
+        acc['lyso_y'].append(evt_lyso_y)
+        acc['lyso_z'].append(evt_lyso_z)
+        acc['lyso_E'].append(evt_lyso_E)
+        acc['lyso_t'].append(evt_lyso_t)
+        acc['lyso_pdg'].append(evt_lyso_pdg)
+
+        acc['dead_E'].append(float(evt_dead_E))
 
         # Positron-only ATAR energy; live_E = positron ATAR + total LYSO.
         evt_lyso_E_sum = float(sum(evt_lyso_E)) if len(evt_lyso_E) > 0 else 0.0
-        out_atar_posE.append(float(evt_atar_posE))
-        out_live_E.append(float(evt_atar_posE + evt_lyso_E_sum))
-        
-        out_theta_init.append(float(thetaInit))
-        out_phi_init.append(float(phiInit))
-        out_positron_energy.append(float(positron_initial_energy))
-        
-        for p_key, o_start_x, o_start_y, o_start_z, o_stop_x, o_stop_y, o_stop_z in [
-            (211, out_pion_start_x, out_pion_start_y, out_pion_start_z, out_pion_stop_x, out_pion_stop_y, out_pion_stop_z),
-            (-13, out_muon_start_x, out_muon_start_y, out_muon_start_z, out_muon_stop_x, out_muon_stop_y, out_muon_stop_z),
-            (-11, out_positron_start_x, out_positron_start_y, out_positron_start_z, out_positron_stop_x, out_positron_stop_y, out_positron_stop_z)
+        acc['atar_posE'].append(float(evt_atar_posE))
+        acc['live_E'].append(float(evt_atar_posE + evt_lyso_E_sum))
+
+        acc['truth_theta'].append(float(thetaInit))
+        acc['truth_phi'].append(float(phiInit))
+        acc['truth_positron_energy'].append(float(positron_initial_energy))
+
+        for p_key, start_keys, stop_keys in [
+            (211,
+             ('truth_pion_start_x', 'truth_pion_start_y', 'truth_pion_start_z'),
+             ('truth_pion_stop_x', 'truth_pion_stop_y', 'truth_pion_stop_z')),
+            (-13,
+             ('truth_muon_start_x', 'truth_muon_start_y', 'truth_muon_start_z'),
+             ('truth_muon_stop_x', 'truth_muon_stop_y', 'truth_muon_stop_z')),
+            (-11,
+             ('truth_positron_start_x', 'truth_positron_start_y', 'truth_positron_start_z'),
+             ('truth_positron_stop_x', 'truth_positron_stop_y', 'truth_positron_stop_z')),
         ]:
-            o_start_x.append(endpoints[p_key]['start'][0])
-            o_start_y.append(endpoints[p_key]['start'][1])
-            o_start_z.append(endpoints[p_key]['start'][2])
-            o_stop_x.append(endpoints[p_key]['stop'][0])
-            o_stop_y.append(endpoints[p_key]['stop'][1])
-            o_stop_z.append(endpoints[p_key]['stop'][2])
+            for idx, k in enumerate(start_keys):
+                acc[k].append(endpoints[p_key]['start'][idx])
+            for idx, k in enumerate(stop_keys):
+                acc[k].append(endpoints[p_key]['stop'][idx])
 
-    # --- SAVE TO PARQUET ---
-    print("Building PyArrow Table...")
-    table = pa.Table.from_arrays([
-        pa.array(out_event_ids),
-        
-        pa.array(out_theta_init),
-        pa.array(out_phi_init),
-        pa.array(out_positron_energy),
-        pa.array(out_pion_start_x), pa.array(out_pion_start_y), pa.array(out_pion_start_z),
-        pa.array(out_pion_stop_x), pa.array(out_pion_stop_y), pa.array(out_pion_stop_z),
-        pa.array(out_muon_start_x), pa.array(out_muon_start_y), pa.array(out_muon_start_z),
-        pa.array(out_muon_stop_x), pa.array(out_muon_stop_y), pa.array(out_muon_stop_z),
-        pa.array(out_positron_start_x), pa.array(out_positron_start_y), pa.array(out_positron_start_z),
-        pa.array(out_positron_stop_x), pa.array(out_positron_stop_y), pa.array(out_positron_stop_z),
-        
-        pa.array(out_atar_x),
-        pa.array(out_atar_y),
-        pa.array(out_atar_z),
-        pa.array(out_atar_t),
-        pa.array(out_atar_truth_t),
-        pa.array(out_atar_E),
-        pa.array(out_atar_view),
-        pa.array(out_atar_pdg),
-        pa.array(out_atar_slice),
-        
-        pa.array(out_lyso_x),
-        pa.array(out_lyso_y),
-        pa.array(out_lyso_z),
-        pa.array(out_lyso_t),
-        pa.array(out_lyso_E),
-        pa.array(out_lyso_pdg),
+        # Flush shard to disk when accumulator reaches shard_size.
+        if len(acc['event_id']) >= shard_size:
+            _flush()
 
-        pa.array(out_dead_E, type=pa.float64()),
-        pa.array(out_atar_posE, type=pa.float64()),
-        pa.array(out_live_E, type=pa.float64()),
-    ], names=[
-        'event_id',
-        'truth_theta', 'truth_phi', 'truth_positron_energy',
-        'truth_pion_start_x', 'truth_pion_start_y', 'truth_pion_start_z',
-        'truth_pion_stop_x', 'truth_pion_stop_y', 'truth_pion_stop_z',
-        'truth_muon_start_x', 'truth_muon_start_y', 'truth_muon_start_z',
-        'truth_muon_stop_x', 'truth_muon_stop_y', 'truth_muon_stop_z',
-        'truth_positron_start_x', 'truth_positron_start_y', 'truth_positron_start_z',
-        'truth_positron_stop_x', 'truth_positron_stop_y', 'truth_positron_stop_z',
-        'atar_x', 'atar_y', 'atar_z', 'atar_t', 'atar_truth_t', 'atar_E', 'atar_view', 'atar_pdg', 'atar_slice_id',
-        'lyso_x', 'lyso_y', 'lyso_z', 'lyso_t', 'lyso_E', 'lyso_pdg',
-        'dead_E',
-        'atar_posE',
-        'live_E',
-    ])
-
-    print(f"Writing to {output_file}...")
-    pq.write_table(table, output_file)
-    print("Done!")
+    # Flush any remaining events.
+    _flush()
+    if writer is not None:
+        writer.close()
+    print(f"Done! Wrote {n_written} events to {output_file}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Convert PIONEER ROOT sim files to flattened Parquet datasets.")
@@ -655,6 +637,8 @@ if __name__ == "__main__":
     parser.add_argument("--max_files", type=int, default=None, help="Max number of ROOT files to process in batch mode")
     parser.add_argument("--shuffle_files", action='store_true', help="Randomize ROOT file ordering before chaining")
     parser.add_argument("--seed", type=int, default=None, help="RNG seed for --shuffle_files (reproducible)")
+    parser.add_argument("--shard_size", type=int, default=100000,
+                        help="Flush to disk every N events to bound RAM (default 100k)")
     args = parser.parse_args()
 
     # 1. Resolve Input Files
@@ -680,11 +664,9 @@ if __name__ == "__main__":
     print(f"Extracting headers from {file_list[0]}...")
     layout_file = ROOT.TFile(file_list[0])
     geo_header = layout_file.Get("GeoHeader")
-    atar_header = layout_file.Get("AtarHeader")
-    
-    if not geo_header or not atar_header:
-        print("Warning: GeoHeader or AtarHeader missing from first file. Metadata might be incomplete.")
+
+    if not geo_header:
+        print("Warning: GeoHeader missing from first file. Metadata might be incomplete.")
 
     # 3. Process
-    geo_lookup = None 
-    process_root_file(file_list, geo_header, atar_header, geo_lookup, args.output, max_events=args.max_events)
+    process_root_file(file_list, geo_header, args.output, max_events=args.max_events, shard_size=args.shard_size)

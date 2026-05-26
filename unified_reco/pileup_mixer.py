@@ -112,7 +112,7 @@ class PileupMixer:
             self.pie_df = None
 
         # Load Calorimeter Geometry LUTs for Radioactivity
-        lut_dir = "/mnt/c/Users/obbee/research/notebooks/ML/caloRecon/"
+        lut_dir = "/data/nvme0/test_ml_data/radio_LUTs/"
         print(f"Loading Geometry LUTs from {lut_dir}...")
         self.geo_lookup = np.load(lut_dir + "crystalLUT.npy")
         self.valid_ids = np.load(lut_dir + "validLUT.npy")

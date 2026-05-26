@@ -216,7 +216,7 @@ class PURITYHybridModel(nn.Module):
     The master unified model combining ATAR tracking and LYSO object condensation.
     """
     def __init__(self, hidden_dim=150, num_blocks=3, heads=5,
-                 dropout=0.05, num_pdg_classes=3):
+                 dropout=0.1, num_pdg_classes=3):
         super().__init__()
 
         # --- Subsystem-aware encoders with clean, physically-motivated feature sets ---
@@ -284,8 +284,8 @@ class PURITYHybridModel(nn.Module):
         # is injected at the final layer so it isn't swamped by the high-dim pooled vector.
         _pdg_hidden = hidden_dim
         self.atar_slice_pdg_body = nn.Sequential(
-            nn.Linear(jk_dim, _pdg_hidden), nn.GELU(), nn.Dropout(0.05),
-            nn.Linear(_pdg_hidden, _pdg_hidden // 2), nn.GELU(), nn.Dropout(0.05),
+            nn.Linear(jk_dim, _pdg_hidden), nn.GELU(), nn.Dropout(0.1),
+            nn.Linear(_pdg_hidden, _pdg_hidden // 2), nn.GELU(), nn.Dropout(0.1),
         )
         self.atar_slice_pdg_norm = nn.LayerNorm(_pdg_hidden // 2 + 1)
         self.atar_slice_pdg_final = nn.Linear(_pdg_hidden // 2 + 1, num_pdg_classes)
@@ -319,8 +319,8 @@ class PURITYHybridModel(nn.Module):
         # 3. Splitter (Node PDG) - Input: Node JK
         # Body compresses per-hit jk representation; total slice energy injected at final layer.
         self.atar_pdg_body = nn.Sequential(
-            nn.Linear(jk_dim, _pdg_hidden), nn.GELU(), nn.Dropout(0.05),
-            nn.Linear(_pdg_hidden, _pdg_hidden // 2), nn.GELU(), nn.Dropout(0.05),
+            nn.Linear(jk_dim, _pdg_hidden), nn.GELU(), nn.Dropout(0.1),
+            nn.Linear(_pdg_hidden, _pdg_hidden // 2), nn.GELU(), nn.Dropout(0.1),
         )
         self.atar_pdg_norm = nn.LayerNorm(_pdg_hidden // 2 + 1)
         self.atar_pdg_final = nn.Linear(_pdg_hidden // 2 + 1, 3)
@@ -466,8 +466,8 @@ class PURITYHybridModel(nn.Module):
         JK_DIM = (self.L_TRIG + 1) * D_A
         ROLE_IN = 3 * JK_DIM + 6
         self.atar_role_head = nn.Sequential(
-            nn.Linear(ROLE_IN, D_A), nn.GELU(), nn.Dropout(0.05),
-            nn.Linear(D_A, D_A // 2), nn.GELU(), nn.Dropout(0.05),
+            nn.Linear(ROLE_IN, D_A), nn.GELU(), nn.Dropout(0.1),
+            nn.Linear(D_A, D_A // 2), nn.GELU(), nn.Dropout(0.1),
             nn.Linear(D_A // 2, 3),
         )
 
