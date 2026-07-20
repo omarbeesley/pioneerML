@@ -1,0 +1,4 @@
+
+/output/FileName ./all#RUN#
+/control/execute config.mac
+/run/beamOn 1000000

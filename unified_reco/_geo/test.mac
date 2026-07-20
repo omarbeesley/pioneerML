@@ -1,0 +1,5 @@
+/control/verbose 1
+/decay/pienu_incl
+/output/FileName ./test#RUN#
+/control/execute config.mac
+/run/beamOn 10000

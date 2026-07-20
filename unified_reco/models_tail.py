@@ -179,18 +179,30 @@ class PURITYTailBackbone(nn.Module):
         self.atar_pdg_norm = nn.LayerNorm(_ph // 2 + 1)
         self.atar_pdg_final = nn.Linear(_ph // 2 + 1, 3)
 
-        # --- ATAR event tokens (D_A=256) ---
+        # --- ATAR event tokens (D_A=256): PURITY-style per-view half-tokens ---
         D_A = 256
         self.D_A = D_A
-        self.atar_kinematics_mlp = nn.Sequential(
-            nn.Linear(21, 64), nn.GELU(), nn.Linear(64, 64),
+        _D_HALF = D_A // 2
+        # Per-view kinematics: each view's endpoints (2 coords x 2 points x 3
+        # quantiles = 12) + slice-PDG logits (3). Mirrors PURITY's
+        # atar_kinematics_mlp_xz / _yz so each view fuses its own endpoint info.
+        self.atar_kinematics_mlp_xz = nn.Sequential(
+            nn.Linear(12 + 3, 64), nn.GELU(), nn.Linear(64, 64),
+        )
+        self.atar_kinematics_mlp_yz = nn.Sequential(
+            nn.Linear(12 + 3, 64), nn.GELU(), nn.Linear(64, 64),
         )
         self.pool_x_event_proj = nn.Sequential(nn.Linear(jk_dim, 128), nn.GELU())
         self.pool_y_event_proj = nn.Sequential(nn.Linear(jk_dim, 128), nn.GELU())
-        self.atar_time_proj = nn.Sequential(nn.Linear(1, 4), nn.GELU())
-        self.atar_event_mlp = nn.Sequential(
-            nn.Linear(128 * 2 + 64 + 4, D_A), nn.GELU(),
-            nn.Linear(D_A, D_A),
+        # Per-view event MLPs fuse view pool (128) + view kinematics (64) into a
+        # D_A//2 half-token; the full slice token is [token_xz || token_yz].
+        # Time is omitted here (as in PURITY); slice_mean_t still reaches the
+        # heads via assemble_tail_features.
+        self.atar_event_mlp_xz = nn.Sequential(
+            nn.Linear(128 + 64, _D_HALF), nn.GELU(), nn.Linear(_D_HALF, _D_HALF),
+        )
+        self.atar_event_mlp_yz = nn.Sequential(
+            nn.Linear(128 + 64, _D_HALF), nn.GELU(), nn.Linear(_D_HALF, _D_HALF),
         )
         self.slice_position_embedding = nn.Embedding(64, D_A)
 
@@ -235,6 +247,10 @@ class PURITYTailBackbone(nn.Module):
             input_dim=jk_dim + 40, num_points=2, coords=1)
         self.atar_endpoint_z = QuantileOutputHead(
             input_dim=jk_dim + 80, num_points=2, coords=1)
+
+        # Separate time-group-graph pipeline -> independent, time-unbiased
+        # pi->e-nu score (additive to PieTaggerHead).
+        self.pie_topo = PieTopoBranch(hidden_dim, heads, dropout=dropout)
 
     def forward(self, x, batch):
         """
@@ -421,21 +437,22 @@ class PURITYTailBackbone(nn.Module):
         z_pred = self.atar_endpoint_z(stereo_concat)
         output['atar_endpoints'] = torch.cat([x_pred, y_pred, z_pred], dim=2)
 
-        # --- Slice mean time (energy-weighted) ---
-        hit_times = x[is_atar, 4]
-        hit_energies = x[is_atar, 3].clamp(min=1e-6)
-        slice_time_wsum = torch.zeros(num_global_slices, device=device)
-        slice_energy_sum_t = torch.zeros(num_global_slices, device=device)
-        slice_time_wsum.index_add_(0, global_slice_idx_all, hit_times * hit_energies)
-        slice_energy_sum_t.index_add_(0, global_slice_idx_all, hit_energies)
-        slice_mean_time = (slice_time_wsum / slice_energy_sum_t.clamp(min=1e-6))[valid_slice_mask]
-        output['slice_mean_time'] = slice_mean_time
+        # (slice_mean_time removed: inter-slice absolute time would let the
+        #  heads reconstruct decay-time gaps and bias the time-spectrum fit.)
 
-        # --- ATAR event tokens ---
-        endpoints_flat = output['atar_endpoints'].detach().reshape(
-            output['atar_endpoints'].size(0), -1)
-        kin_input = torch.cat([endpoints_flat, output['atar_slice_pdg'].detach()], dim=1)
-        atar_kin_feat = self.atar_kinematics_mlp(kin_input)
+        # --- ATAR event tokens: PURITY-style per-view half-tokens ---
+        # Endpoints: [N_slices, 2 points, 3 coords (x,y,z), 3 quantiles]. Split
+        # per view so each view's pool fuses with its own endpoint info: xz takes
+        # coords (x,z), yz takes (y,z) -> 12 features each. NOT detached: the whole
+        # trunk trains, so the endpoint / slice-PDG heads also learn via this path.
+        endpoints_all = output['atar_endpoints']
+        endpoints_xz_flat = endpoints_all[:, :, [0, 2], :].reshape(endpoints_all.size(0), -1)
+        endpoints_yz_flat = endpoints_all[:, :, [1, 2], :].reshape(endpoints_all.size(0), -1)
+        slice_pdg_feat = output['atar_slice_pdg']
+        atar_kin_xz = self.atar_kinematics_mlp_xz(
+            torch.cat([endpoints_xz_flat, slice_pdg_feat], dim=1))
+        atar_kin_yz = self.atar_kinematics_mlp_yz(
+            torch.cat([endpoints_yz_flat, slice_pdg_feat], dim=1))
 
         if has_x.any():
             pool_x_ev = self.pool_x_event(
@@ -449,9 +466,10 @@ class PURITYTailBackbone(nn.Module):
             pool_y_ev = torch.zeros(num_global_slices, jk_dim, device=device)
         proj_x_ev = self.pool_x_event_proj(pool_x_ev[valid_slice_mask])
         proj_y_ev = self.pool_y_event_proj(pool_y_ev[valid_slice_mask])
-        time_feat = self.atar_time_proj(slice_mean_time.unsqueeze(-1))
-        event_input = torch.cat([proj_x_ev, proj_y_ev, atar_kin_feat, time_feat], dim=1)
-        atar_event_tokens = self.atar_event_mlp(event_input)
+        # Per-view half-tokens -> concatenated stereo slice token [token_xz || token_yz].
+        token_xz = self.atar_event_mlp_xz(torch.cat([proj_x_ev, atar_kin_xz], dim=1))
+        token_yz = self.atar_event_mlp_yz(torch.cat([proj_y_ev, atar_kin_yz], dim=1))
+        atar_event_tokens = torch.cat([token_xz, token_yz], dim=1)
         valid_slice_indices = torch.nonzero(valid_slice_mask).squeeze(1)
         local_slice_ids = (valid_slice_indices % num_slices_max).clamp(max=63)
         atar_event_tokens = atar_event_tokens + self.slice_position_embedding(local_slice_ids)
@@ -481,6 +499,7 @@ class PURITYTailBackbone(nn.Module):
         trigger_prob_full = torch.zeros(num_global_slices, device=device)
         trigger_prob_full[valid_slice_mask] = trigger_probs
         hit_trigger_prob = trigger_prob_full[global_slice_idx_all]
+        output['atar_hit_trigger_prob'] = hit_trigger_prob  # per-hit positron-slice membership
         pion_prob = torch.sigmoid(output['atar_node_pdg'][:, PION_CLASS]).detach()
         pion_gate = (hit_trigger_prob * pion_prob).unsqueeze(-1)
         h_pion = h_atar * pion_gate
@@ -542,6 +561,14 @@ class PURITYTailBackbone(nn.Module):
         muon_gate_sum = global_add_pool(muon_gate, batch_atar, size=num_graphs_in_batch)
         output['muon_event_pool'] = muon_event_pool / muon_gate_sum.clamp(min=1e-6)
 
+        # --- Time-group-graph branch: independent, time-unbiased pie score ---
+        output['pie_topo_logit'] = self.pie_topo(
+            h_atar_in, x, is_atar, is_atar_x, is_atar_y,
+            atar_edge_index, atar_edge_attr,
+            global_slice_idx_x, global_slice_idx_y, global_slice_idx_all,
+            valid_slice_mask, num_global_slices, num_slices_max,
+            num_graphs_in_batch)
+
         return output
 
 
@@ -550,51 +577,56 @@ class PURITYTailBackbone(nn.Module):
 # detached, normalized, aligned.
 # ==========================================================================
 
-def assemble_tail_features(output, x, batch):
+def assemble_tail_features(output, x, batch, detach=False):
     is_atar = output['is_atar']
     B = output['num_graphs_in_batch']
     device = x.device
 
+    # detach=True (frozen trunk) -> heads see fixed features.
+    # detach=False (standalone end-to-end) -> gradients flow from every head
+    # back into the shared stereo trunk, so the whole backbone trains.
+    d = (lambda t: t.detach()) if detach else (lambda t: t)
+
     # per-hit
-    h_atar = output['h_atar'].detach()
-    node_pdg = output['atar_node_pdg'].detach()
+    h_atar = d(output['h_atar'])
+    node_pdg = d(output['atar_node_pdg'])
     node_probs = torch.sigmoid(node_pdg)
     muon_prob = node_probs[:, MUON_CLASS]
     mip_prob = node_probs[:, MIP_CLASS]
+    pion_prob = node_probs[:, PION_CLASS]   # per-hit pion-ness (piDIF head)
     hit_pos = x[is_atar, 0:3]
     hit_energy = x[is_atar, 3]
     hit_time = x[is_atar, 4]
     batch_atar = batch[is_atar]
+    hit_trigger_prob = d(output['atar_hit_trigger_prob'])   # per-hit positron-slice membership
+    hit_is_yz = (x[is_atar, 6] > 0.5).float()               # stereo view flag (y-z vs x-z)
 
     # per-slice (valid only)
-    slice_pdg = output['atar_slice_pdg'].detach()
-    slice_multi = output['atar_slice_multi'].detach().unsqueeze(-1)
-    slice_trigger = torch.sigmoid(output['atar_trigger_logits']).detach().unsqueeze(-1)
-    slice_energy = output['slice_energy'][output['valid_slice_mask']].detach()
-    slice_mean_t = output['slice_mean_time'].detach().unsqueeze(-1)
-    event_tokens = output['atar_event_tokens'].detach()
+    slice_pdg = d(output['atar_slice_pdg'])
+    slice_multi = d(output['atar_slice_multi']).unsqueeze(-1)
+    slice_trigger = d(torch.sigmoid(output['atar_trigger_logits'])).unsqueeze(-1)
+    slice_energy = d(output['slice_energy'][output['valid_slice_mask']])
+    event_tokens = d(output['atar_event_tokens'])
     valid_slice_indices = torch.nonzero(output['valid_slice_mask']).squeeze(1)
     B_slice_idx = (valid_slice_indices // output['num_slices_max']).long()
 
     # per-graph anchors
-    pion_stop = output['atar_pion_stop'].detach()
-    positron_dir = output['atar_positron_dir'].detach()
-    exit_dir = output['exit_dir_per_graph'].detach()
-    positron_time = output['positron_time'].detach().unsqueeze(-1)
-    pion_pool = output['pion_event_pool'].detach()
-    mip_pool = output['mip_event_pool'].detach()
-    muon_pool = output['muon_event_pool'].detach()
+    pion_stop = d(output['atar_pion_stop'])
+    positron_dir = d(output['atar_positron_dir'])
+    exit_dir = d(output['exit_dir_per_graph'])
+    pion_pool = d(output['pion_event_pool'])
+    mip_pool = d(output['mip_event_pool'])
+    muon_pool = d(output['muon_event_pool'])
 
     return dict(
         B=B, device=device,
-        h_atar=h_atar, muon_prob=muon_prob, mip_prob=mip_prob,
+        h_atar=h_atar, muon_prob=muon_prob, mip_prob=mip_prob, pion_prob=pion_prob,
         hit_pos=hit_pos, hit_energy=hit_energy, hit_time=hit_time,
-        batch_atar=batch_atar,
+        batch_atar=batch_atar, hit_trigger_prob=hit_trigger_prob, hit_is_yz=hit_is_yz,
         slice_pdg=slice_pdg, slice_multi=slice_multi, slice_trigger=slice_trigger,
-        slice_energy=slice_energy, slice_mean_t=slice_mean_t,
+        slice_energy=slice_energy,
         event_tokens=event_tokens, B_slice_idx=B_slice_idx,
         pion_stop=pion_stop, positron_dir=positron_dir, exit_dir=exit_dir,
-        positron_time=positron_time,
         pion_pool=pion_pool, mip_pool=mip_pool, muon_pool=muon_pool,
     )
 
@@ -688,7 +720,11 @@ class MuonVetoHead(nn.Module):
         t = f['hit_time'].unsqueeze(-1)
         t_w = global_add_pool(t * w, f['batch_atar'], size=f['B']) / w_sum
         t2_w = global_add_pool((t ** 2) * w, f['batch_atar'], size=f['B']) / w_sum
-        mu_tspan = (t2_w - t_w ** 2).clamp(min=0.0).sqrt()
+        # +1e-6 inside the sqrt: sqrt'(0)=inf, and the muon time-variance is
+        # exactly 0 for degenerate events (single muon hit / coincident times),
+        # which would otherwise send an inf gradient through grad-clipping and
+        # NaN out every weight. The eps keeps the gradient finite.
+        mu_tspan = ((t2_w - t_w ** 2).clamp(min=0.0) + 1e-6).sqrt()
 
         # gap continuity score: placeholder (0). DTAR hits would fill this in.
         gap_score = torch.zeros_like(E_mu)
@@ -738,6 +774,388 @@ class MuonVetoHead(nn.Module):
 
 
 # ==========================================================================
+# MuonDIFVetoHead
+# --------------------------------------------------------------------------
+# POSITRON-SLICE CONTAMINATION detector for pi-DAR -> mu-DIF -> e. muDIF is NOT
+# confused with mu-DAR (a stopped stub in its own slice — the muon veto's job);
+# it is confused with pi -> e nu, because the in-flight muon decays PROMPTLY,
+# so its few muon hits sit INSIDE the positron's (trigger) slice and the event
+# mimics clean pi -> e nu. The question is simply: are there ANY muon-like hits
+# contaminating the positron slice? Muon range is irrelevant.
+#
+# Ingredients, NOTHING geometric hard-coded:
+#   (1) Per-hit contamination classifier with FiLM: a per-hit context (hit_energy,
+#       mip_prob, reconstructed positron_dir, view) generates (gamma, beta) that
+#       MODULATE the projected h_atar, so energy + direction actually steer the
+#       ionization judgment (6 raw dims would be drowned by the 450-d embedding).
+#       The head LEARNS the geometric path-length correction (a positron along a
+#       strip deposits more). g = that prob x positron-slice membership.
+#   (2) Aggregates of g: max_g / lse_g (any muon hit in the positron slice?) and
+#       mean_g = Sum(g) / Sum(trigger-prob) = contamination FRACTION of the positron
+#       slice (a density — invariant to track length / hit count).
+#   (3) Two kink variables — ionization coupled with a direction change at the
+#       muon->positron vertex, per VIEW (z shared; x/y transverse never mixed):
+#       - max_kink_coupling (per-hit): max_i g_i*(1 - cos_in_view_i), the in-view angle
+#         between a hit's displacement-from-pion-stop and the reco positron dir.
+#       - kink_diff (DIFFERENTIAL): order the positron-slice hits along the track (by
+#         in-view distance from the pion stop) and take the vertex where the local
+#         DIRECTION change (turning between consecutive segments) and the local ENERGY
+#         change |dE| coincide — the explicit decay-vertex kink.
+#   (4) corr_dist_ion: weighted correlation between (stereo-correct) distance to the
+#       pion stop and the per-hit contamination over the positron slice. Negative =>
+#       ionization piled up near the stop = the prompt muon. No distance threshold.
+# Trained against the in-flight labels (muon_dif_present / muon_dif_hits).
+# ==========================================================================
+
+class MuonDIFVetoHead(nn.Module):
+    N_SCALARS = 6  # max_g, lse_g, mean_g, corr_dist_ion, max_kink_coupling, kink_diff
+    SCALAR_NAMES = ("max_g", "lse_g", "mean_g", "corr_dist_ion",
+                    "max_kink_coupling", "kink_diff")
+    GEO_CTX = 7    # FiLM ctx: hit_energy, mip_prob, positron_dir(3), is_yz, pred_muon_dist
+
+    def __init__(self, jk_dim, hidden=128):
+        super().__init__()
+        # FiLM: the per-hit physics context modulates the projected embedding so that
+        # energy + direction steer the contamination judgment, instead of being drowned
+        # as 6 raw dims among 450. Nothing about the pixel geometry is fixed.
+        self.h_proj = nn.Linear(jk_dim, hidden)
+        self.film = nn.Sequential(
+            nn.Linear(self.GEO_CTX, hidden), nn.GELU(), nn.Linear(hidden, 2 * hidden),
+        )
+        self.contam_out = nn.Linear(hidden, 1)
+        self.gated_pool = AttentionalAggregation(
+            nn.Sequential(nn.Linear(jk_dim, hidden), nn.GELU(), nn.Linear(hidden, 1))
+        )
+        self.pool_proj = nn.Linear(jk_dim, hidden)
+        self.scalar_mlp = nn.Sequential(
+            nn.Linear(self.N_SCALARS, hidden), nn.GELU(), nn.Linear(hidden, hidden),
+        )
+        self.fuse = nn.Sequential(
+            nn.Linear(hidden * 2, hidden), nn.GELU(), nn.Linear(hidden, 1),
+        )
+        # Explicit muon travel-distance regressor: pools the MUON-gated trunk embedding and
+        # predicts |muon_stop - muon_start| (mm). Its (detached) prediction conditions the
+        # per-hit FiLM, so "how far did the muon travel" steers the contamination read — a
+        # short predicted range is exactly the hard, pie-like muDIF.
+        self.dist_pool = AttentionalAggregation(
+            nn.Sequential(nn.Linear(jk_dim, hidden), nn.GELU(), nn.Linear(hidden, 1))
+        )
+        self.dist_mlp = nn.Sequential(
+            nn.Linear(jk_dim, hidden), nn.GELU(), nn.Linear(hidden, 1),
+        )
+
+    def _predict_muon_dist(self, f):
+        # muon travel distance (mm), regressed from the muon-prob-gated trunk embedding.
+        muon_gated = f['h_atar'] * f['muon_prob'].unsqueeze(-1)
+        dist_emb = self.dist_pool(muon_gated, f['batch_atar'], dim_size=f['B'])
+        return F.softplus(self.dist_mlp(dist_emb)).squeeze(-1)        # [B], >= 0
+
+    def _per_hit_contam(self, f, pred_dist):
+        # FiLM: physics context -> (gamma, beta) that modulate the projected embedding,
+        # so energy IN CONJUNCTION WITH direction/view AND the predicted muon range
+        # conditions the ionization read. pred_dist is DETACHED (the regression loss owns
+        # it; the score only consumes it) and broadcast per-hit.
+        ctx = torch.cat([
+            f['hit_energy'].unsqueeze(-1),
+            f['mip_prob'].unsqueeze(-1),
+            f['positron_dir'][f['batch_atar']],
+            f['hit_is_yz'].unsqueeze(-1),
+            pred_dist.detach()[f['batch_atar']].unsqueeze(-1),
+        ], dim=-1)
+        h = self.h_proj(f['h_atar'])
+        gamma, beta = self.film(ctx).chunk(2, dim=-1)
+        h = F.gelu((1.0 + gamma) * h + beta)
+        return self.contam_out(h).squeeze(-1)
+
+    def _stereo_dist_to_pion_stop(self, f):
+        # Each hit has ONE measured transverse coord (+ z); project the reconstructed
+        # pion stop onto that same axis (z is common to both views). No raw 3D norm.
+        is_yz = f['hit_is_yz'] > 0.5
+        ps = f['pion_stop'][f['batch_atar']]                   # [N, 3]
+        transverse = torch.where(is_yz, f['hit_pos'][:, 1], f['hit_pos'][:, 0])
+        ps_tr      = torch.where(is_yz, ps[:, 1], ps[:, 0])
+        dz = f['hit_pos'][:, 2] - ps[:, 2]
+        return torch.sqrt((transverse - ps_tr) ** 2 + dz ** 2 + 1e-12)
+
+    def _weighted_corr(self, d, g, w, batch, B):
+        # Weighted Pearson corr(d, g) per graph — no hard-coded distance threshold.
+        eps = 1e-6
+        P = lambda v: global_add_pool((w * v).unsqueeze(-1), batch, size=B).squeeze(-1)
+        Sw = P(torch.ones_like(d)).clamp(min=eps)
+        md, mg = P(d) / Sw, P(g) / Sw
+        cov = P(d * g) / Sw - md * mg
+        vd = (P(d * d) / Sw - md * md).clamp(min=0.0)
+        vg = (P(g * g) / Sw - mg * mg).clamp(min=0.0)
+        return cov / torch.sqrt(vd * vg + eps)
+
+    def _kink_diff(self, f):
+        """Differential, per-VIEW kink. Order each (event, view)'s positron-slice hits
+        along the track (by in-view distance from the pion stop), then take the vertex
+        where the local DIRECTION change (turning between consecutive segments) and the
+        local ENERGY change |dE| coincide — the explicit muon->positron decay vertex.
+        Pure geometry/energy from the (input) hits; per-view so x/y transverse never mix.
+        Small/empty groups fall through to 0 via the masks (no host sync)."""
+        eps = 1e-6
+        batch, B = f['batch_atar'], f['B']
+        is_yz = f['hit_is_yz'] > 0.5
+        ps = f['pion_stop'][batch]
+        transverse = torch.where(is_yz, f['hit_pos'][:, 1], f['hit_pos'][:, 0])
+        ps_tr      = torch.where(is_yz, ps[:, 1], ps[:, 0])
+        zc = f['hit_pos'][:, 2]
+        p = torch.stack([transverse, zc], dim=-1)                  # [N,2] in-view position
+        s = torch.sqrt((transverse - ps_tr) ** 2 + (zc - ps[:, 2]) ** 2 + eps)  # along-track
+        gid = batch * 2 + is_yz.long()                             # group per (event, view)
+
+        trig = f['hit_trigger_prob'] > 0.5                         # positron-slice hits
+        gid, p, s, e, bidx = (gid[trig], p[trig], s[trig],
+                              f['hit_energy'][trig], batch[trig])
+
+        # lexicographic order by (group, along-track distance) via two stable sorts.
+        o = torch.argsort(s, stable=True)
+        o = o[torch.argsort(gid[o], stable=True)]
+        gid, p, e, bidx = gid[o], p[o], e[o], bidx[o]
+
+        dp = p[1:] - p[:-1]                                        # consecutive segments
+        seg_ok = (gid[1:] == gid[:-1])                            # segment within one group
+        u = dp / dp.norm(dim=-1, keepdim=True).clamp(min=eps)
+        de = (e[1:] - e[:-1]).abs()                               # |dE| per segment
+
+        turn = 1.0 - (u[1:] * u[:-1]).sum(-1)                     # [M-2] direction change at vertex
+        e_change = torch.maximum(de[1:], de[:-1])                 # energy change around the vertex
+        vtx_ok = (seg_ok[1:] & seg_ok[:-1]).to(turn.dtype)        # 3 consecutive hits in one group
+        coupling = turn * e_change * vtx_ok
+        return scatter_max_dense(coupling, bidx[1:-1], B)
+
+    def compute_contam_features(self, f, g):
+        batch, B = f['batch_atar'], f['B']
+
+        max_g = scatter_max_dense(g, batch, B)
+        lse_g = scatter_logsumexp_dense(g, batch, B)
+        # mean contamination over the positron slice (Sum(g) / Sum(trigger-prob)) —
+        # a density, so invariant to track length / total hit count.
+        sum_g = global_add_pool(g.unsqueeze(-1), batch, size=B).squeeze(-1)
+        sum_htp = global_add_pool(
+            f['hit_trigger_prob'].unsqueeze(-1), batch, size=B).squeeze(-1).clamp(min=1e-6)
+        mean_g = sum_g / sum_htp
+
+        # start-vs-end ionization profile over the positron slice.
+        d = self._stereo_dist_to_pion_stop(f)
+        corr_dist_ion = self._weighted_corr(d, g, f['hit_trigger_prob'], batch, B)
+
+        # (kept) per-hit kink: a heavily-contaminated (high-g) hit pointing a different
+        # IN-VIEW direction (its displacement from the projected pion stop) than the
+        # reconstructed positron. Fires when ionization AND a direction difference coincide.
+        is_yz = f['hit_is_yz'] > 0.5
+        ps = f['pion_stop'][batch]
+        pd = f['positron_dir'][batch]
+        tr   = torch.where(is_yz, f['hit_pos'][:, 1], f['hit_pos'][:, 0])
+        ps_t = torch.where(is_yz, ps[:, 1], ps[:, 0])
+        pd_t = torch.where(is_yz, pd[:, 1], pd[:, 0])
+        disp = torch.stack([tr - ps_t, f['hit_pos'][:, 2] - ps[:, 2]], dim=-1)  # [N,2] in-view
+        pdir = torch.stack([pd_t, pd[:, 2]], dim=-1)                            # [N,2] in-view
+        disp = disp / disp.norm(dim=-1, keepdim=True).clamp(min=1e-6)
+        pdir = pdir / pdir.norm(dim=-1, keepdim=True).clamp(min=1e-6)
+        cos_in_view = (disp * pdir).sum(-1)
+        max_kink_coupling = scatter_max_dense(g * (1.0 - cos_in_view), batch, B)
+
+        # (new) DIFFERENTIAL kink: per-view ordered turning x |dE| at the decay vertex.
+        kink_diff = self._kink_diff(f)
+
+        return torch.stack(
+            [max_g, lse_g, mean_g, corr_dist_ion, max_kink_coupling, kink_diff],
+            dim=-1)  # [B, 6]
+
+    def forward(self, features, return_parts=False):
+        f = features
+        pred_dist = self._predict_muon_dist(f)                         # [B] muon range (mm)
+        contam_node_logit = self._per_hit_contam(f, pred_dist)
+        g = torch.sigmoid(contam_node_logit) * f['hit_trigger_prob']  # muon-like AND in positron slice
+
+        scalars = self.compute_contam_features(f, g)
+        scalar_feat = self.scalar_mlp(scalars)
+
+        # Pool over the whole positron slice (gated by trigger membership, NOT by g)
+        # so the GNN-learned local structure — incl. the muon->positron kink (3b) —
+        # reaches the event score via attention.
+        gated = f['h_atar'] * f['hit_trigger_prob'].unsqueeze(-1)
+        pool = self.gated_pool(gated, f['batch_atar'], dim_size=f['B'])
+        pool_feat = F.gelu(self.pool_proj(pool))
+
+        mudif_logit = self.fuse(torch.cat([pool_feat, scalar_feat], dim=-1)).squeeze(-1)
+        if return_parts:   # for the feature-importance probe (mudif_importance.py)
+            return mudif_logit, contam_node_logit, {"scalars": scalars, "pool_feat": pool_feat,
+                                                    "pred_dist": pred_dist}
+        return mudif_logit, contam_node_logit, pred_dist
+
+
+# ==========================================================================
+# PionDIFVetoHead
+# --------------------------------------------------------------------------
+# PION-TRACK-SHAPE detector for pi[DIF] -> mu[DAR] -> e. Unlike muDIF (an extra
+# in-flight MUON contaminating the positron slice), piDIF's positron is an
+# ORDINARY mu-DAR Michel positron — identical to the Michel background. The WHOLE
+# signal is in the PION's behavior before it made the muon: a stopping pion (pi-DAR)
+# deposits a Bragg peak at the end of its range; a DIF pion converts mid-flight, so
+# it shows (a) NO Bragg rise and (b) a KINK at the pi->mu vertex. So this head
+# scrutinizes the PROMPT PION TRACK / reco pion-stop region (NOT the positron
+# slice). Nothing geometric hard-coded; timing stays OUT (the big free suppression
+# is an analysis-level prompt window, kept out of the head to not bias the time
+# spectrum). It leans on the reco pion_stop / node-PDG, which ARE supervised in the
+# current weights.
+#
+# Ingredients (mirroring MuonDIFVetoHead's FiLM + scalars + attention scaffold):
+#   (1) Per-hit pion-track classifier with FiLM: context [hit_energy, pion_prob,
+#       mip_prob, is_yz, signed dz-to-stop] modulates the projected embedding so the
+#       Bragg region (energy near the stop) is read in context. g_pi = that prob x
+#       pion_prob isolates a confident in-flight pion-track hit.
+#   (2) bragg_corr = weighted corr(distance-to-pion-stop, hit_energy) over the pion
+#       track (weight = pion_prob, UNBIASED to DIF so it discriminates both classes):
+#       a STOPPING pion piles energy at the stop (corr < 0); a DIF pion is flat
+#       (corr ~ 0) -> the no-Bragg discriminant. No distance threshold.
+#   (3) total_pion_edep / mean_pion_dedx: a DIF pion deposits less of its energy
+#       (truncated, no Bragg peak) than a fully-ranged stopping pion.
+#   (4) kink_diff: per-VIEW differential turning x |dE| along the PROMPT
+#       (non-positron-slice) track, ordered by distance from the reco stop, at the
+#       pi->mu vertex.
+# Trained vs the in-flight pion labels (pidif_present / pidif_hits).
+# ==========================================================================
+
+class PionDIFVetoHead(nn.Module):
+    N_SCALARS = 5
+    SCALAR_NAMES = ("total_pion_edep", "max_pion_g", "bragg_corr",
+                    "mean_pion_dedx", "kink_diff")
+    GEO_CTX = 5    # per-hit FiLM context: hit_energy, pion_prob, mip_prob, is_yz, dz_to_stop
+
+    def __init__(self, jk_dim, hidden=128):
+        super().__init__()
+        self.h_proj = nn.Linear(jk_dim, hidden)
+        self.film = nn.Sequential(
+            nn.Linear(self.GEO_CTX, hidden), nn.GELU(), nn.Linear(hidden, 2 * hidden),
+        )
+        self.track_out = nn.Linear(hidden, 1)
+        self.gated_pool = AttentionalAggregation(
+            nn.Sequential(nn.Linear(jk_dim, hidden), nn.GELU(), nn.Linear(hidden, 1))
+        )
+        self.pool_proj = nn.Linear(jk_dim, hidden)
+        self.scalar_mlp = nn.Sequential(
+            nn.Linear(self.N_SCALARS, hidden), nn.GELU(), nn.Linear(hidden, hidden),
+        )
+        self.fuse = nn.Sequential(
+            nn.Linear(hidden * 2, hidden), nn.GELU(), nn.Linear(hidden, 1),
+        )
+
+    def _stereo_dz_dist(self, f):
+        # Each hit has ONE measured transverse coord (+ z); project the reco pion stop
+        # onto that same axis (z common to both views). Returns (signed dz, |dist|).
+        is_yz = f['hit_is_yz'] > 0.5
+        ps = f['pion_stop'][f['batch_atar']]
+        transverse = torch.where(is_yz, f['hit_pos'][:, 1], f['hit_pos'][:, 0])
+        ps_tr      = torch.where(is_yz, ps[:, 1], ps[:, 0])
+        dz = f['hit_pos'][:, 2] - ps[:, 2]
+        dist = torch.sqrt((transverse - ps_tr) ** 2 + dz ** 2 + 1e-12)
+        return dz, dist
+
+    def _per_hit_track(self, f, dz):
+        ctx = torch.cat([
+            f['hit_energy'].unsqueeze(-1),
+            f['pion_prob'].unsqueeze(-1),
+            f['mip_prob'].unsqueeze(-1),
+            f['hit_is_yz'].unsqueeze(-1),
+            (dz / 5.0).unsqueeze(-1),
+        ], dim=-1)
+        h = self.h_proj(f['h_atar'])
+        gamma, beta = self.film(ctx).chunk(2, dim=-1)
+        h = F.gelu((1.0 + gamma) * h + beta)
+        return self.track_out(h).squeeze(-1)
+
+    def _weighted_corr(self, d, e, w, batch, B):
+        # Weighted Pearson corr(d, e) per graph — no hard-coded distance threshold.
+        eps = 1e-6
+        P = lambda v: global_add_pool((w * v).unsqueeze(-1), batch, size=B).squeeze(-1)
+        Sw = P(torch.ones_like(d)).clamp(min=eps)
+        md, me = P(d) / Sw, P(e) / Sw
+        cov = P(d * e) / Sw - md * me
+        vd = (P(d * d) / Sw - md * md).clamp(min=0.0)
+        ve = (P(e * e) / Sw - me * me).clamp(min=0.0)
+        return cov / torch.sqrt(vd * ve + eps)
+
+    def _kink_diff(self, f, sel):
+        """Per-VIEW differential kink along the PROMPT track (sel = non-positron-slice
+        hits). Order each (event,view)'s selected hits by distance from the reco pion
+        stop, then take the vertex where local turning and |dE| coincide — the pi->mu
+        kink. z shared; x/y transverse never mixed. Empty groups fall through to 0."""
+        eps = 1e-6
+        batch, B = f['batch_atar'], f['B']
+        is_yz = f['hit_is_yz'] > 0.5
+        ps = f['pion_stop'][batch]
+        transverse = torch.where(is_yz, f['hit_pos'][:, 1], f['hit_pos'][:, 0])
+        ps_tr      = torch.where(is_yz, ps[:, 1], ps[:, 0])
+        zc = f['hit_pos'][:, 2]
+        p = torch.stack([transverse, zc], dim=-1)
+        s = torch.sqrt((transverse - ps_tr) ** 2 + (zc - ps[:, 2]) ** 2 + eps)
+        gid = batch * 2 + is_yz.long()
+        gid, p, s, e, bidx = gid[sel], p[sel], s[sel], f['hit_energy'][sel], batch[sel]
+
+        o = torch.argsort(s, stable=True)
+        o = o[torch.argsort(gid[o], stable=True)]
+        gid, p, e, bidx = gid[o], p[o], e[o], bidx[o]
+
+        dp = p[1:] - p[:-1]
+        seg_ok = (gid[1:] == gid[:-1])
+        u = dp / dp.norm(dim=-1, keepdim=True).clamp(min=eps)
+        de = (e[1:] - e[:-1]).abs()
+        turn = 1.0 - (u[1:] * u[:-1]).sum(-1)
+        e_change = torch.maximum(de[1:], de[:-1])
+        vtx_ok = (seg_ok[1:] & seg_ok[:-1]).to(turn.dtype)
+        coupling = turn * e_change * vtx_ok
+        return scatter_max_dense(coupling, bidx[1:-1], B)
+
+    def compute_track_features(self, f, g_pi):
+        batch, B = f['batch_atar'], f['B']
+        w_pi = f['pion_prob']                       # unbiased pion-track weight
+
+        max_pion_g = scatter_max_dense(g_pi, batch, B)   # confident DIF-pion hit present?
+
+        total_raw = global_add_pool(
+            (f['hit_energy'] * w_pi).unsqueeze(-1), batch, size=B).squeeze(-1)
+        sum_w = global_add_pool(w_pi.unsqueeze(-1), batch, size=B).squeeze(-1).clamp(min=1e-6)
+        mean_pion_dedx = total_raw / sum_w
+        total_pion_edep = total_raw / 10.0          # ~MeV scale
+
+        # Bragg: energy-vs-distance-to-stop profile over the pion track (UNBIASED to DIF).
+        _, dist = self._stereo_dz_dist(f)
+        bragg_corr = self._weighted_corr(dist, f['hit_energy'], w_pi, batch, B)
+
+        # kink at the pi->mu vertex over the PROMPT (non-positron) track.
+        prompt = f['hit_trigger_prob'] < 0.5
+        kink_diff = self._kink_diff(f, prompt)
+
+        return torch.stack(
+            [total_pion_edep, max_pion_g, bragg_corr, mean_pion_dedx, kink_diff],
+            dim=-1)  # [B, 5]
+
+    def forward(self, features, return_parts=False):
+        f = features
+        dz, _ = self._stereo_dz_dist(f)
+        track_node_logit = self._per_hit_track(f, dz)
+        g_pi = torch.sigmoid(track_node_logit) * f['pion_prob']  # pion-track AND pion-like
+
+        scalars = self.compute_track_features(f, g_pi)
+        scalar_feat = self.scalar_mlp(scalars)
+
+        # Pool over pion-like hits (gated by pion_prob, NOT g) so the GNN-learned track
+        # shape — Bragg profile / pi->mu kink — reaches the event score via attention.
+        gated = f['h_atar'] * f['pion_prob'].unsqueeze(-1)
+        pool = self.gated_pool(gated, f['batch_atar'], dim_size=f['B'])
+        pool_feat = F.gelu(self.pool_proj(pool))
+
+        pidif_logit = self.fuse(torch.cat([pool_feat, scalar_feat], dim=-1)).squeeze(-1)
+        if return_parts:
+            return pidif_logit, track_node_logit, {"scalars": scalars, "pool_feat": pool_feat}
+        return pidif_logit, track_node_logit
+
+
+# ==========================================================================
 # PileupVetoHead
 # --------------------------------------------------------------------------
 # Mirrors MuonVetoHead's three-pathway redundancy on ATAR pileup signals.
@@ -762,9 +1180,11 @@ class PileupVetoHead(nn.Module):
         self.pool_proj = nn.Linear(jk_dim, hidden)
 
         # (b) ATAR-only structural scalars:
-        #   [n_valid_slices_norm, slice_t_span, max_non_trigger_prob,
+        #   [n_valid_slices_norm, max_non_trigger_prob,
         #    n_non_trigger_slices_norm, hit_t_span]
-        N_KIN = 5
+        # (slice_t_span dropped with slice_mean_t; hit_t_span is an intra-event
+        #  spread, which does not bias the inter-slice time spectrum.)
+        N_KIN = 4
         self.kin_mlp = nn.Sequential(
             nn.Linear(N_KIN, hidden), nn.GELU(),
             nn.Linear(hidden, hidden),
@@ -802,12 +1222,6 @@ class PileupVetoHead(nn.Module):
             f['B_slice_idx'], size=B,
         ) / 4.0
 
-        # span of slice mean times (clean events stay tight)
-        slice_t = f['slice_mean_t'].squeeze(-1)
-        max_t = scatter_max_dense(slice_t, f['B_slice_idx'], B)
-        min_t = -scatter_max_dense(-slice_t, f['B_slice_idx'], B)
-        slice_span = ((max_t - min_t) / 100.0).unsqueeze(-1)
-
         # biggest non-trigger slice (low trigger prob)
         non_trigger = 1.0 - f['slice_trigger'].squeeze(-1)
         max_non_trigger = scatter_max_dense(
@@ -825,7 +1239,7 @@ class PileupVetoHead(nn.Module):
         min_ht = -scatter_max_dense(-hit_t, f['batch_atar'], B)
         hit_span = ((max_ht - min_ht) / 100.0).unsqueeze(-1)
 
-        return torch.cat([n_slices, slice_span, max_non_trigger,
+        return torch.cat([n_slices, max_non_trigger,
                           n_non_trigger, hit_span], dim=-1)
 
     def compute_max_features(self, f):
@@ -883,27 +1297,28 @@ class PieTaggerHead(nn.Module):
 
         # anchor projections
         self.pion_anchor_proj = nn.Linear(jk_dim + 3, d_tail)
-        self.positron_anchor_proj = nn.Linear(jk_dim + 3 + 3 + 1, d_tail)
+        # positron anchor: mip_pool + positron_dir(3) + exit_dir(3). positron_time
+        # dropped -- absolute decay time would bias the time-spectrum fit.
+        self.positron_anchor_proj = nn.Linear(jk_dim + 3 + 3, d_tail)
         self.muon_anchor_proj = nn.Linear(jk_dim + 6, d_tail)  # muon_pool + kin(6)
 
-        # per-graph physics-region pools
+        # per-graph physics-region pools (spatial only; the time-gated "late"
+        # pool was removed with positron_time).
         def _make_gate():
             return AttentionalAggregation(nn.Sequential(
                 nn.Linear(jk_dim, 64), nn.GELU(), nn.Linear(64, 1)))
         self.along_start_pool = _make_gate()
         self.along_end_pool = _make_gate()
-        self.late_pool = _make_gate()
         self.along_start_proj = nn.Linear(jk_dim, d_tail)
         self.along_end_proj = nn.Linear(jk_dim, d_tail)
-        self.late_proj = nn.Linear(jk_dim, d_tail)
 
         # per-slice token: event_token (256) + [slice_pdg(3), multi(1),
-        #                                       trigger(1), energy(1), time(1)]
-        self.slice_proj = nn.Linear(256 + 7, d_tail)
+        #                                       trigger(1), energy(1)]
+        self.slice_proj = nn.Linear(256 + 6, d_tail)
 
         # token-type embedding
-        # 0:CLS 1:pion 2:pos 3:mu 4:start 5:end 6:late 7:slice
-        self.token_type_emb = nn.Embedding(8, d_tail)
+        # 0:CLS 1:pion 2:pos 3:mu 4:start 5:end 6:slice
+        self.token_type_emb = nn.Embedding(7, d_tail)
         self.cls = nn.Parameter(torch.randn(1, 1, d_tail) * 0.02)
 
         enc_layer = nn.TransformerEncoderLayer(
@@ -931,10 +1346,6 @@ class PieTaggerHead(nn.Module):
         end_w = torch.sigmoid((proj - tau) * 0.5)
         return start_w, end_w
 
-    def _late_weights(self, f):
-        positron_t = f['positron_time'].squeeze(-1)[f['batch_atar']]
-        return (f['hit_time'] - positron_t).clamp(min=0.0).sigmoid()
-
     def forward(self, f, muon_kinematics):
         B = f['B']
         dev = f['device']
@@ -944,27 +1355,23 @@ class PieTaggerHead(nn.Module):
             torch.cat([f['pion_pool'], f['pion_stop']], dim=-1))
         positron_anchor = self.positron_anchor_proj(
             torch.cat([f['mip_pool'], f['positron_dir'],
-                       f['exit_dir'], f['positron_time']], dim=-1))
+                       f['exit_dir']], dim=-1))
         muon_anchor = self.muon_anchor_proj(
             torch.cat([f['muon_pool'], muon_kinematics], dim=-1))
 
-        # --- physics-region pool tokens ---
+        # --- physics-region pool tokens (spatial only) ---
         start_w, end_w = self._along_track_weights(f)
-        late_w = self._late_weights(f)
         start_vec = self.along_start_pool(
             f['h_atar'] * start_w.unsqueeze(-1), f['batch_atar'], dim_size=B)
         end_vec = self.along_end_pool(
             f['h_atar'] * end_w.unsqueeze(-1), f['batch_atar'], dim_size=B)
-        late_vec = self.late_pool(
-            f['h_atar'] * late_w.unsqueeze(-1), f['batch_atar'], dim_size=B)
         start_tok = self.along_start_proj(start_vec)
         end_tok = self.along_end_proj(end_vec)
-        late_tok = self.late_proj(late_vec)
 
         # --- slice tokens ---
         slice_feats = torch.cat([
             f['event_tokens'], f['slice_pdg'], f['slice_multi'],
-            f['slice_trigger'], f['slice_energy'], f['slice_mean_t'],
+            f['slice_trigger'], f['slice_energy'],
         ], dim=-1)
         slice_tokens = self.slice_proj(slice_feats)
         sort_idx = torch.argsort(f['B_slice_idx'])
@@ -974,7 +1381,7 @@ class PieTaggerHead(nn.Module):
         # --- type embeddings ---
         type_ids = {
             'cls': 0, 'pion': 1, 'pos': 2, 'mu': 3,
-            'start': 4, 'end': 5, 'late': 6, 'slice': 7,
+            'start': 4, 'end': 5, 'slice': 6,
         }
         def typed(v, name):
             return v + self.token_type_emb(torch.full(
@@ -987,12 +1394,11 @@ class PieTaggerHead(nn.Module):
             typed(muon_anchor,     'mu'),
             typed(start_tok,       'start'),
             typed(end_tok,         'end'),
-            typed(late_tok,        'late'),
         ], dim=1)
         dense_slices = typed(dense_slices, 'slice')
         seq = torch.cat([typed(cls_tok, 'cls'), fixed_tokens, dense_slices], dim=1)
 
-        n_fixed = 1 + 6
+        n_fixed = 1 + 5
         pad = torch.cat([
             torch.zeros(B, n_fixed, dtype=torch.bool, device=dev),
             ~slice_pad_mask,
@@ -1003,7 +1409,110 @@ class PieTaggerHead(nn.Module):
 
 
 # ==========================================================================
-# Top-level model: trunk + two tail heads, 2D output.
+# PieTopoBranch: a SEPARATE pipeline that builds a graph over the time groups
+# (slices), lets a transformer exchange information across them, and reads out
+# an INDEPENDENT pi->e-nu score (pie_topo_logit). It breaks off after the
+# shared low-level hit projection (h_atar_in) but runs its OWN GNN, so it is a
+# largely independent second opinion on the event topology.
+#
+# Deliberately UNBIASED: it uses only the time-free trunk projection, spatial
+# slice geometry and ATAR energy -- no decay/hit time, no inter-slice time gap
+# -- so a cut on its score does not warp the positron-energy or decay-time
+# spectra. Whether pi->mu->e is identified is read off the slice TOPOLOGY (is
+# there an extra time group co-located with the pion stop), not the timing.
+# ==========================================================================
+
+class PieTopoBranch(nn.Module):
+    def __init__(self, hidden_dim, heads, dropout=0.05,
+                 num_blocks=2, d_node=D_TAIL, n_layers=2, n_heads=4):
+        super().__init__()
+        # Own ATAR GNN over the shared low-level projection (independent weights).
+        self.topo_blocks = nn.ModuleList([
+            JointAttentionBlock(hidden_dim=hidden_dim, heads=heads,
+                                edge_dim=4, dropout=dropout)
+            for _ in range(num_blocks)
+        ])
+        self.topo_jk = JumpingKnowledge(mode="cat")
+        topo_jk_dim = hidden_dim * num_blocks
+
+        # Per-view attentional pools -> one stereo node per time group (slice).
+        def make_pool():
+            return AttentionalAggregation(nn.Sequential(
+                nn.Linear(topo_jk_dim, hidden_dim), nn.GELU(),
+                nn.Linear(hidden_dim, 1)))
+        self.pool_x_topo = make_pool()
+        self.pool_y_topo = make_pool()
+
+        # Node feature = [pool_x || pool_y || total_E, log_count, centroid_xyz].
+        # Spatial centroid lets the transformer reason about co-location; no time.
+        self.node_proj = nn.Sequential(
+            nn.Linear(topo_jk_dim * 2 + 5, d_node), nn.GELU(),
+            nn.Linear(d_node, d_node))
+
+        # Transformer information-exchange across time-group nodes + CLS readout.
+        self.cls = nn.Parameter(torch.randn(1, 1, d_node) * 0.02)
+        enc_layer = nn.TransformerEncoderLayer(
+            d_model=d_node, nhead=n_heads, dim_feedforward=d_node * 4,
+            batch_first=True, dropout=dropout)
+        self.transformer = nn.TransformerEncoder(enc_layer, num_layers=n_layers)
+        self.head = nn.Linear(d_node, 1)
+
+    def forward(self, h_atar_in, x, is_atar, is_atar_x, is_atar_y,
+                edge_index, edge_attr, global_slice_idx_x, global_slice_idx_y,
+                global_slice_idx_all, valid_slice_mask, num_global_slices,
+                num_slices_max, num_graphs):
+        device = x.device
+
+        # --- own GNN over the shared low-level projection ---
+        h = h_atar_in
+        xs = []
+        for block in self.topo_blocks:
+            h = block(h, edge_index, edge_attr)
+            xs.append(h[is_atar])
+        h_topo = self.topo_jk(xs)                       # [N_atar, topo_jk_dim]
+        topo_jk_dim = h_topo.size(1)
+        h_topo_x = h_topo[is_atar_x[is_atar]]
+        h_topo_y = h_topo[is_atar_y[is_atar]]
+
+        # --- stereo pool per time group (slice) ---
+        if is_atar_x.any():
+            pool_x = self.pool_x_topo(h_topo_x, global_slice_idx_x,
+                                      dim_size=num_global_slices)
+        else:
+            pool_x = torch.zeros(num_global_slices, topo_jk_dim, device=device)
+        if is_atar_y.any():
+            pool_y = self.pool_y_topo(h_topo_y, global_slice_idx_y,
+                                      dim_size=num_global_slices)
+        else:
+            pool_y = torch.zeros(num_global_slices, topo_jk_dim, device=device)
+
+        # --- spatial / energy node scalars (NO time) ---
+        ones = torch.ones(int(is_atar.sum()), 1, device=device)
+        count = global_add_pool(ones, global_slice_idx_all, size=num_global_slices)
+        e_sum = global_add_pool(x[is_atar, 3:4], global_slice_idx_all, size=num_global_slices)
+        pos_sum = global_add_pool(x[is_atar, 0:3], global_slice_idx_all, size=num_global_slices)
+        centroid = pos_sum / count.clamp(min=1.0)
+        scalars = torch.cat([e_sum, torch.log1p(count), centroid], dim=1)
+
+        node_in = torch.cat([pool_x, pool_y, scalars], dim=1)[valid_slice_mask]
+        nodes = self.node_proj(node_in)                 # [num_valid_slices, d_node]
+
+        # --- transformer info-exchange across the time-group nodes (per event) ---
+        valid_slice_indices = torch.nonzero(valid_slice_mask).squeeze(1)
+        B_slice_idx = (valid_slice_indices // num_slices_max).long()
+        sort_idx = torch.argsort(B_slice_idx)
+        dense, mask = to_dense_batch(nodes[sort_idx], B_slice_idx[sort_idx],
+                                     batch_size=num_graphs)
+        cls = self.cls.expand(num_graphs, -1, -1)
+        seq = torch.cat([cls, dense], dim=1)
+        pad = torch.cat([torch.zeros(num_graphs, 1, dtype=torch.bool, device=device),
+                         ~mask], dim=1)
+        out = self.transformer(seq, src_key_padding_mask=pad)
+        return self.head(out[:, 0]).squeeze(-1)          # [num_graphs]
+
+
+# ==========================================================================
+# Top-level model: trunk + three veto/tag heads + the time-group-graph head.
 # ==========================================================================
 
 class PURITYTailModel(nn.Module):
@@ -1021,20 +1530,25 @@ class PURITYTailModel(nn.Module):
 
     Downstream analysis cuts in the 3D (pie, muon, pileup) plane.
 
-    freeze_trunk: if True (default), the backbone's parameters do not
-    receive gradients. This is the Stage 1 setup — train heads against a
-    converged PURITY trunk. Flip to False for Stage 2 end-to-end fine-tuning.
+    freeze_trunk: standalone default is False — the whole ATAR trunk trains
+    end-to-end from scratch on the tail tasks (feature assembly keeps the trunk
+    in the gradient path). Set True only for a Stage-1 setup with a pretrained
+    backbone loaded; then the backbone params are frozen AND the assembled
+    features are detached.
     """
 
     def __init__(self, hidden_dim=150, num_blocks=3, heads=5,
-                 dropout=0.05, num_pdg_classes=3, freeze_trunk=True):
+                 dropout=0.05, num_pdg_classes=3, freeze_trunk=False):
         super().__init__()
+        self.freeze_trunk = freeze_trunk
         self.backbone = PURITYTailBackbone(
             hidden_dim=hidden_dim, num_blocks=num_blocks, heads=heads,
             dropout=dropout, num_pdg_classes=num_pdg_classes,
         )
         jk_dim = self.backbone.jk_dim
         self.muon_veto   = MuonVetoHead(jk_dim)
+        self.mudif_veto  = MuonDIFVetoHead(jk_dim)   # in-flight muon (mu-DIF), orthogonal
+        self.pidif_veto  = PionDIFVetoHead(jk_dim)   # in-flight pion (pi-DIF), orthogonal
         self.pileup_veto = PileupVetoHead(jk_dim)
         self.pie_tagger  = PieTaggerHead(jk_dim)
 
@@ -1047,16 +1561,23 @@ class PURITYTailModel(nn.Module):
         if 'h_atar' not in output:
             return output
 
-        f = assemble_tail_features(output, x, batch)
+        f = assemble_tail_features(output, x, batch, detach=self.freeze_trunk)
         muon_logit, muon_node_logit, muon_kin = self.muon_veto(f)
+        mudif_logit, mudif_node_logit, mudif_dist = self.mudif_veto(f)
+        pidif_logit, pidif_node_logit         = self.pidif_veto(f)
         pileup_logit, pileup_node_logit       = self.pileup_veto(f)
         pie_logit = self.pie_tagger(f, muon_kin)
 
-        output['pie_logit']         = pie_logit
-        output['muon_logit']        = muon_logit
-        output['pileup_logit']      = pileup_logit
-        output['muon_node_logit']   = muon_node_logit
-        output['pileup_node_logit'] = pileup_node_logit
+        output['pie_logit']           = pie_logit
+        output['muon_logit']          = muon_logit
+        output['muon_dif_logit']      = mudif_logit
+        output['muon_travel_pred']    = mudif_dist
+        output['pion_dif_logit']      = pidif_logit
+        output['pileup_logit']        = pileup_logit
+        output['muon_node_logit']     = muon_node_logit
+        output['muon_dif_node_logit'] = mudif_node_logit
+        output['pion_dif_node_logit'] = pidif_node_logit
+        output['pileup_node_logit']   = pileup_node_logit
         return output
 
 
@@ -1077,16 +1598,23 @@ class PURITYTailModel(nn.Module):
 
 def pie_tagger_loss(out, targets,
                     pos_weight_pie=4.0, pos_weight_muon=1.0, pos_weight_pileup=2.0,
+                    pos_weight_muon_dif=5.0, pos_weight_pion_dif=5.0,
                     pos_weight_aux_muon=10.0, pos_weight_aux_pileup=10.0,
-                    w_pie=1.0, w_muon=1.0, w_pileup=1.0,
-                    w_aux_muon=0.3, w_aux_pileup=0.3):
+                    pos_weight_aux_muon_dif=10.0, pos_weight_aux_pion_dif=10.0,
+                    pos_weight_pie_topo=4.0,
+                    w_pie=1.0, w_muon=1.0, w_pileup=1.0, w_muon_dif=1.0, w_pion_dif=1.0,
+                    w_aux_muon=0.3, w_aux_pileup=0.0, w_aux_muon_dif=0.0, w_aux_pion_dif=0.0,
+                    w_muon_dist=0.0, muon_dist_scale=0.3,
+                    w_pie_topo=1.0):
     """
     targets dict:
         'is_pie':           [B]       1 if event_type == 1
-        'muon_present':     [B]       1 if any (atar_pdg & MUON) in event
+        'muon_present':     [B]       1 if any stopped (mu-DAR) muon hit
         'pileup_present':   [B]       1 if any (atar_origin > 0)  ATAR-only
-        'muon_hits':        [N_atar]  per-hit muon labels
+        'muon_dif_present': [B]       1 if any in-flight (mu-DIF) muon hit
+        'muon_hits':        [N_atar]  per-hit stopped-muon labels
         'pileup_hits':      [N_atar]  per-hit pileup labels (origin > 0)
+        'muon_dif_hits':    [N_atar]  per-hit in-flight-muon labels
         'muon_hit_mask':    [N_atar]  which hits participate in aux losses
     """
     device = out['pie_logit'].device
@@ -1104,23 +1632,87 @@ def pie_tagger_loss(out, targets,
         pos_weight=torch.tensor(pos_weight_pileup, device=device),
     )
 
+    total = w_pie * pie_bce + w_muon * muon_bce + w_pileup * pileup_bce
+    parts = dict(pie_bce=pie_bce, muon_bce=muon_bce, pileup_bce=pileup_bce)
+
+    # In-flight muon (mu-DIF) veto — its own head, orthogonal to the muon veto.
+    # Guarded by presence + weight so it cleanly disables (ablation / old models).
+    if w_muon_dif > 0 and 'muon_dif_logit' in out:
+        muon_dif_bce = F.binary_cross_entropy_with_logits(
+            out['muon_dif_logit'], targets['muon_dif_present'].float(),
+            pos_weight=torch.tensor(pos_weight_muon_dif, device=device),
+        )
+        total = total + w_muon_dif * muon_dif_bce
+        parts['muon_dif_bce'] = muon_dif_bce
+
+    # Muon travel-distance regression (mm). Penalized ONLY on muDIF events (is_mudif),
+    # and WEIGHTED toward the shortest distances (w = exp(-d_true / muon_dist_scale)) —
+    # the short-range muons are the hard, pie-like cases that drive the residual leakage.
+    if w_muon_dist > 0 and 'muon_travel_pred' in out and 'muon_travel' in targets:
+        mdm = targets['is_mudif'].bool()
+        if mdm.any():
+            td = targets['muon_travel'][mdm].float()
+            pdh = out['muon_travel_pred'][mdm].float()
+            w = torch.exp(-td / max(muon_dist_scale, 1e-6))
+            per = F.smooth_l1_loss(pdh, td, reduction='none')
+            muon_dist_loss = (w * per).sum() / w.sum().clamp(min=1e-6)
+            total = total + w_muon_dist * muon_dist_loss
+            parts['muon_dist'] = muon_dist_loss
+
+    # In-flight pion (pi-DIF) veto — its own head, orthogonal to the others.
+    if w_pion_dif > 0 and 'pion_dif_logit' in out:
+        pion_dif_bce = F.binary_cross_entropy_with_logits(
+            out['pion_dif_logit'], targets['pion_dif_present'].float(),
+            pos_weight=torch.tensor(pos_weight_pion_dif, device=device),
+        )
+        total = total + w_pion_dif * pion_dif_bce
+        parts['pion_dif_bce'] = pion_dif_bce
+
+    # Per-hit aux losses — each is computed, added, and logged ONLY when its
+    # weight > 0. So a disabled term (e.g. the per-hit pileup aux at
+    # w_aux_pileup=0) is truly absent from the loss AND the printed breakdown,
+    # not just zero-weighted-but-still-shown.
     m = targets['muon_hit_mask'].bool()
-    if m.any():
+    if w_aux_muon > 0 and m.any():
         aux_muon = F.binary_cross_entropy_with_logits(
             out['muon_node_logit'][m], targets['muon_hits'][m].float(),
             pos_weight=torch.tensor(pos_weight_aux_muon, device=device),
         )
+        total = total + w_aux_muon * aux_muon
+        parts['aux_muon'] = aux_muon
+    if w_aux_pileup > 0 and m.any():
         aux_pileup = F.binary_cross_entropy_with_logits(
             out['pileup_node_logit'][m], targets['pileup_hits'][m].float(),
             pos_weight=torch.tensor(pos_weight_aux_pileup, device=device),
         )
-    else:
-        aux_muon = torch.zeros((), device=device)
-        aux_pileup = torch.zeros((), device=device)
+        total = total + w_aux_pileup * aux_pileup
+        parts['aux_pileup'] = aux_pileup
+    if w_aux_muon_dif > 0 and m.any() and 'muon_dif_node_logit' in out:
+        # Per-hit in-flight-muon aux. Needs aux_mask="all" to see in-flight hits
+        # (aux_mask="muon" selects stopped-muon hits, which exclude them).
+        aux_muon_dif = F.binary_cross_entropy_with_logits(
+            out['muon_dif_node_logit'][m], targets['muon_dif_hits'][m].float(),
+            pos_weight=torch.tensor(pos_weight_aux_muon_dif, device=device),
+        )
+        total = total + w_aux_muon_dif * aux_muon_dif
+        parts['aux_muon_dif'] = aux_muon_dif
+    if w_aux_pion_dif > 0 and m.any() and 'pion_dif_node_logit' in out:
+        # Per-hit in-flight-pion aux (the DIF pion's own hits, origin 0 in a kPidif
+        # event). Needs aux_mask="all" so the prompt pion hits are in the mask.
+        aux_pion_dif = F.binary_cross_entropy_with_logits(
+            out['pion_dif_node_logit'][m], targets['pion_dif_hits'][m].float(),
+            pos_weight=torch.tensor(pos_weight_aux_pion_dif, device=device),
+        )
+        total = total + w_aux_pion_dif * aux_pion_dif
+        parts['aux_pion_dif'] = aux_pion_dif
 
-    total = (w_pie * pie_bce + w_muon * muon_bce + w_pileup * pileup_bce
-             + w_aux_muon * aux_muon + w_aux_pileup * aux_pileup)
-    return total, dict(
-        pie_bce=pie_bce, muon_bce=muon_bce, pileup_bce=pileup_bce,
-        aux_muon=aux_muon, aux_pileup=aux_pileup,
-    )
+    # Independent time-group-graph pie score (additive; only if the branch ran).
+    if 'pie_topo_logit' in out:
+        pie_topo_bce = F.binary_cross_entropy_with_logits(
+            out['pie_topo_logit'], targets['is_pie'].float(),
+            pos_weight=torch.tensor(pos_weight_pie_topo, device=device),
+        )
+        total = total + w_pie_topo * pie_topo_bce
+        parts['pie_topo_bce'] = pie_topo_bce
+
+    return total, parts

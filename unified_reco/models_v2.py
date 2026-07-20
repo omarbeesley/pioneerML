@@ -56,6 +56,23 @@ class PURITYHybridModelV2(PURITYHybridModel):
         jk_dim = hidden_dim * num_blocks
         D_A = self.D_A  # 256
 
+        # === V2 CHANGE 0: TIME-BLIND LYSO node encoder ===
+        # The base class encodes LYSO nodes from [x, y, z, E, t] (col 4 = absolute time).
+        # That absolute time flows through the ATAR<-LYSO cross-attention into the trigger/
+        # MIP classifiers and hence into the accept decision, letting the model gate on the
+        # calo cluster's absolute (decay) time — it learns to reject positrons coincident
+        # with negative-time calo clusters, so old-muon acceptance is NOT flat in time.  Drop
+        # col 4 here: nodes carry only [x, y, z, E].  Relative timing needed for clustering
+        # still reaches the model as |dt| on the LYSO edges (build_lyso_edge_attr) and as the
+        # TOF-corrected coincidence feature; the slice grouping (col 8) handles coarse time
+        # grouping.  Forward must feed x[is_lyso, :4] to match this Linear(4, ...).
+        self.lyso_encoder = nn.Sequential(
+            nn.Linear(4, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+        )
+
         # === V2 CHANGE 1: ATAR Event Builder FFN 2×D_A → 4×D_A ===
         # Wider FFN gives each layer more capacity to process slice relationships
         # without adding extra hops (L_TRIG stays at 2 — chain is max 2 hops).
@@ -168,7 +185,9 @@ class PURITYHybridModelV2(PURITYHybridModel):
             h_atar_in[is_atar] = h_proj + self.atar_view_embedding(view_idx)
 
         if is_lyso.any():
-            h_lyso_in[is_lyso] = self.lyso_encoder(x[is_lyso, :5])
+            # Time-blind: nodes = [x, y, z, E] only (col 4 = absolute time dropped, V2 CHANGE 0).
+            # Relative timing reaches the model via |dt| on LYSO edges, not the node features.
+            h_lyso_in[is_lyso] = self.lyso_encoder(x[is_lyso, :4])
 
         # 2. Physics-Based Edge Construction
         edge_index = physics_edge_index_batch(x, batch)
@@ -704,9 +723,21 @@ class PURITYHybridModelV2(PURITYHybridModel):
                 trigger_prob_full_t[valid_slice_mask] = atar_trigger_probs
                 hit_trigger_prob_t = trigger_prob_full_t[global_slice_idx_all]
                 mip_class_prob_t = torch.sigmoid(output['atar_node_pdg'][:, 2]).detach()
+                pion_class_prob_t = torch.sigmoid(output['atar_node_pdg'][:, 0]).detach()
+                muon_class_prob_t = torch.sigmoid(output['atar_node_pdg'][:, 1]).detach()
                 output['atar_hit_trigger_prob'] = hit_trigger_prob_t.detach()
                 output['atar_hit_mip_prob'] = mip_class_prob_t
-                positron_hit_mask = (hit_trigger_prob_t > 0.5) & (mip_class_prob_t > 0.5)
+                output['atar_hit_pion_prob'] = pion_class_prob_t
+                output['atar_hit_muon_prob'] = muon_class_prob_t
+                # A positron hit must be a triggering MIP with the non-MIP (pion/muon) classes
+                # both suppressed (<0.05).  This rejects merged pixels where a muon's stopping
+                # Bragg deposit (or a pion stop) shares the positron's crystal within the merge
+                # window: such pixels carry BOTH the muon/pion and positron bits, and their
+                # heavy deposit would otherwise leak ~muon-KE into the positron energy/time for
+                # early-decay michels (a decay-time-correlated fake-pie bias).
+                clean_pos_t = (pion_class_prob_t < 0.05) & (muon_class_prob_t < 0.05)
+                positron_hit_mask = ((hit_trigger_prob_t > 0.5) & (mip_class_prob_t > 0.5)
+                                     & clean_pos_t)
 
                 batch_atar_t = batch[is_atar]
                 hit_w = positron_hit_mask.float()
@@ -719,6 +750,69 @@ class PURITYHybridModelV2(PURITYHybridModel):
                     t_num / t_den.clamp(min=1.0),
                     torch.full_like(t_num, NO_POSITRON_TIME),
                 )
+
+                # --- Robust "consensus" positron time (pileup-hardened readout) ---
+                # A merged pileup hit sits in a DIFFERENT time-slice than the real positron,
+                # so it drags the plain mean (above).  Instead: sum the soft positron weight
+                # (P_trig * P_mip) per time-slice, pick the DOMINANT slice, and use its
+                # weighted-mean time -- outlier hits in other slices cannot move it.
+                w_pos = hit_trigger_prob_t * mip_class_prob_t                 # [N_atar]
+                sl_w  = torch.zeros(num_global_slices, device=x.device)
+                sl_wt = torch.zeros(num_global_slices, device=x.device)
+                sl_w.index_add_(0, global_slice_idx_all, w_pos)
+                sl_wt.index_add_(0, global_slice_idx_all, w_pos * x[is_atar, 4])
+                sl_mean = sl_wt / sl_w.clamp(min=1e-6)
+                sl_w_bg = sl_w.view(num_graphs_in_batch, num_slices_max)
+                sl_m_bg = sl_mean.view(num_graphs_in_batch, num_slices_max)
+                best_sl = sl_w_bg.argmax(dim=1)
+                consensus_t = sl_m_bg[torch.arange(num_graphs_in_batch, device=x.device), best_sl]
+                output['positron_time_consensus'] = torch.where(
+                    sl_w_bg.sum(dim=1) > 1e-3, consensus_t,
+                    torch.full_like(consensus_t, NO_POSITRON_TIME))
+
+                # --- DIAGNOSTIC: per-slice MEAN confidence readout + tagged-slice count ---
+                # (1) MEAN-based dominant slice: highest AVERAGE (P_trig*P_mip) per hit, not the
+                #     hit-count-weighted SUM.  A many-hit accidental cannot win on length alone.
+                sl_cnt = torch.zeros(num_global_slices, device=x.device)
+                sl_cnt.index_add_(0, global_slice_idx_all, torch.ones_like(w_pos))
+                sl_meanconf = sl_w / sl_cnt.clamp(min=1.0)                 # avg P_trig*P_mip in slice
+                sl_mc_bg = sl_meanconf.view(num_graphs_in_batch, num_slices_max)
+                best_sl_mc = sl_mc_bg.argmax(dim=1)
+                consensus_mc_t = sl_m_bg[torch.arange(num_graphs_in_batch, device=x.device), best_sl_mc]
+                output['positron_time_consensus_meanconf'] = torch.where(
+                    sl_mc_bg.max(dim=1).values > 1e-3, consensus_mc_t,
+                    torch.full_like(consensus_mc_t, NO_POSITRON_TIME))
+                # (2) how many DISTINCT slices contribute a tagged (trig>0.5 & mip>0.5) hit to the
+                #     plain-mean average -> >=2 means multiple positrons are being blended.
+                hit_tagged = ((hit_trigger_prob_t > 0.5) & (mip_class_prob_t > 0.5)).float()
+                sl_tag = torch.zeros(num_global_slices, device=x.device)
+                sl_tag.index_add_(0, global_slice_idx_all, hit_tagged)
+                sl_tag_bg = (sl_tag.view(num_graphs_in_batch, num_slices_max) > 0.5)
+                output['n_tagged_pos_slices'] = sl_tag_bg.sum(dim=1)
+
+                # --- ARGMAX-ROLE single-slice readout (exclusivity-consistent) ---
+                # Force exactly ONE positron slice: argmax of the role head's e-in-chain
+                # probability -- the quantity the chain-exclusivity loss concentrates onto one
+                # slice.  Unlike the trig*MIP consensus (which the longer accidental track can
+                # win), this uses the head trained to isolate the chain positron; and when it
+                # errs it returns the accidental's OWN (flat) time -> the sideband subtracts it,
+                # instead of a prompt blend.  Time value = that slice's MIP-weighted mean time.
+                if 'atar_role_logits' in output:
+                    role_e = torch.softmax(output['atar_role_logits'].detach(), dim=-1)[:, 2]  # [N_valid]
+                    sl_role = torch.zeros(num_global_slices, device=x.device)
+                    sl_role[valid_slice_mask] = role_e
+                    sl_mw  = torch.zeros(num_global_slices, device=x.device)
+                    sl_mwt = torch.zeros(num_global_slices, device=x.device)
+                    sl_mw.index_add_(0, global_slice_idx_all, mip_class_prob_t)
+                    sl_mwt.index_add_(0, global_slice_idx_all, mip_class_prob_t * x[is_atar, 4])
+                    sl_time_mip = sl_mwt / sl_mw.clamp(min=1e-6)
+                    sl_role_bg = sl_role.view(num_graphs_in_batch, num_slices_max)
+                    sl_tmip_bg = sl_time_mip.view(num_graphs_in_batch, num_slices_max)
+                    best_role_sl = sl_role_bg.argmax(dim=1)
+                    argmax_role_t = sl_tmip_bg[torch.arange(num_graphs_in_batch, device=x.device), best_role_sl]
+                    output['positron_time_argmax_role'] = torch.where(
+                        sl_role_bg.max(dim=1).values > 1e-3, argmax_role_t,
+                        torch.full_like(argmax_role_t, NO_POSITRON_TIME))
 
             if task_weights.get('w_positron_angle', 0.0) > 0.0 and 'atar_trigger_logits' in output:
                 if truth_positron_mask is not None:
@@ -851,7 +945,7 @@ class PURITYHybridModelV2(PURITYHybridModel):
             seed_slice_id = torch.gather(g_slice_id, dim=1, index=topk_idx).long()
             g_time, _ = to_dense_batch(x_lyso[:, 4], lyso_batch, batch_size=B)
             g_time[~mask] = 0.0
-            cluster_mean_time = torch.bmm(w_norm.transpose(1, 2), g_time.unsqueeze(-1)).squeeze(-1)
+            cluster_time_wsum = torch.bmm(w_norm.transpose(1, 2), g_time.unsqueeze(-1)).squeeze(-1)
 
             g_energy[~mask] = 0.0
             cluster_energy_sum = torch.bmm(w_norm.transpose(1, 2), g_energy.unsqueeze(-1)).squeeze(-1)
@@ -876,6 +970,17 @@ class PURITYHybridModelV2(PURITYHybridModel):
                 w_norm.transpose(1, 2), g_phys_pos
             ) / w_sum_safe.unsqueeze(-1)
             cluster_phys_pos = cluster_phys_pos.masked_fill(seed_invalid.unsqueeze(-1), 0.0)
+
+            # Weighted MEAN time. The bmm alone is a per-seed weighted SUM
+            # (w_norm normalizes over seeds per hit, so its hit-sum is the
+            # soft hit count, not 1) — divide by w_sum_safe exactly as
+            # cluster_phys_pos does. Checkpoints trained before 2026-07-11
+            # saw the un-divided, size-scaled time, which saturated the
+            # event-builder temporal attention bias at the clamp constant;
+            # their sigma_t_* params adapted to that dead bias, so evals of
+            # old checkpoints under this code see a live bias they were not
+            # trained with.
+            cluster_mean_time = (cluster_time_wsum / w_sum_safe).masked_fill(seed_invalid, 0.0)
 
             ps_lyso = pion_stop_pred.detach().unsqueeze(1) * 0.1
             hit_delta = g_phys_pos - ps_lyso
@@ -1010,7 +1115,13 @@ class PURITYHybridModelV2(PURITYHybridModel):
                 ], dim=-1)
                 lyso_cluster_times = cluster_mean_time_padded[has_lyso].view(-1) * NORM_T_LYSO
                 lyso_cluster_etimes = cluster_energy_time_padded[has_lyso].view(-1)
-                lyso_cluster_energies = cluster_e_mean.view(-1).detach()
+                # Feed the cluster TOTAL energy (cluster_e_flat) to the 1/sqrt(E) time/angle
+                # resolution laws, NOT the per-crystal mean (cluster_e_mean = total/soft_n_hits).
+                # Detector resolution scales as 1/sqrt(E_total); the per-crystal mean inflated the
+                # E-term by sqrt(soft_n_hits) (channel-asymmetric: ~2.44x pie vs 2.23x michel) and,
+                # since soft_n_hits ~ sqrt(E_total), gave sigma ~ E^-0.25 instead of E^-0.5. The
+                # per-crystal mean is kept as a network FEATURE in angular_feat_full above.
+                lyso_cluster_energies = cluster_e_flat.view(-1).detach()
                 output['lyso_cluster_energies'] = lyso_cluster_energies
 
                 output['lyso_dt_from_pos'] = dt_from_pos.view(-1)
@@ -1133,7 +1244,14 @@ class PURITYHybridModelV2(PURITYHybridModel):
 
                 mod_i = dense_modality.unsqueeze(2)
                 mod_j = dense_modality.unsqueeze(1)
-                expected_dt = (mod_j - mod_i).float() * TOF_NS
+                # dt[i,j] = t_i - t_j. The positron crosses the ATAR before the
+                # calorimeter, so for i=ATAR (mod 0), j=LYSO (mod 1) the peak
+                # belongs at t_ATAR - t_LYSO = -TOF, i.e. (mod_i - mod_j)*TOF.
+                # Pre-2026-07-11 this was (mod_j - mod_i): sign-flipped, and
+                # moot only because the size-scaled cluster time saturated the
+                # bias. Matches the dt_corr = dt_from_pos - TOF convention of
+                # the coincidence feature.
+                expected_dt = (mod_i - mod_j).float() * TOF_NS
 
                 is_lyso_tok = (dense_modality == 1).float()
                 sigma_lyso_tok = (
@@ -1259,8 +1377,15 @@ class PURITYHybridModelV2(PURITYHybridModel):
 
         trig_p = output.get('atar_hit_trigger_prob')
         mip_p = output.get('atar_hit_mip_prob')
+        pion_p = output.get('atar_hit_pion_prob')
+        muon_p = output.get('atar_hit_muon_prob')
         if trig_p is not None and mip_p is not None and is_atar.any():
             pos_mask = ((trig_p > 0.5) & (mip_p > 0.5)).float()
+            # suppress merged muon-Bragg / pion-stop pixels (both non-MIP class probs < 0.05)
+            # so their heavy deposit does not leak into the positron energy sum -- see the
+            # positron_hit_mask above; keeps clean positron hits, drops muon/pion-contaminated ones.
+            if pion_p is not None and muon_p is not None:
+                pos_mask = pos_mask * ((pion_p < 0.05) & (muon_p < 0.05)).float()
             batch_atar = batch[is_atar]
             e_atar = x[is_atar, 3] * NORM_E_ATAR
             pos_energy.index_add_(0, batch_atar, e_atar * pos_mask)

@@ -41,6 +41,7 @@ BASE_TASK_WEIGHTS = {
     'w_endpoints':              0.01,
     'w_lyso_condensation':      0.25,
     'w_atar_trigger_slice':     0.5,
+    'w_chain_exclusive':        5.0,   # heavy: exactly ONE e+ in the triggering chain
     'w_time_spread':            1.0,
     'time_spread_thresh_ns':    1.0,
     'time_spread_trig_floor':   0.25,
@@ -57,6 +58,7 @@ BASE_TASK_WEIGHTS = {
 # Keys zeroed out during Stage 1.
 STAGE2_KEYS = [
     'w_atar_trigger_slice',
+    'w_chain_exclusive',    # needs a competent role head first
     'w_time_spread',
     'w_event_builder',
     'w_pion_kinematics',
@@ -173,8 +175,15 @@ def train_one_epoch(model, dataloader, optimizer, criterion, task_weights,
                     factor = linear_warmup_factor(global_step, warmup_steps)
                     apply_warmup(optimizer, base_lrs, factor)
 
-                torch.nn.utils.clip_grad_norm_(model.parameters(), clip_norm)
-                optimizer.step()
+                total_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), clip_norm)
+                # Guard: a NaN/inf gradient (e.g. a NaN forward output made finite-loss by
+                # the BCE nan_to_num, or a degenerate-geometry backward) makes total_norm
+                # non-finite; clip_grad_norm_ PROPAGATES it, so stepping would write NaN into
+                # every parameter and poison the whole model. Skip the step instead.
+                if torch.isfinite(total_norm):
+                    optimizer.step()
+                else:
+                    n_failed += 1
                 optimizer.zero_grad()
                 accum_count = 0
                 global_step += 1

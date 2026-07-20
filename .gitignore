@@ -13,5 +13,19 @@ benchmark_plots/
 benchmark_plots_v*/
 *diagnostics*/
 
+# --- Large binaries / data / generated figures (regenerable, too big for GitHub) ---
+*.root
+*.parquet
+*.npz
+*.npy
+*.gdml
+*.csv
+*.png
+*.pdf
+*.pth
+
+# --- Private thesis prose: keep OUT of this (public) repo ---
+*.tex
+
 # Claude Code harness
 .claude/

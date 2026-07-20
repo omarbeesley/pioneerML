@@ -1,0 +1,5 @@
+
+/decay/pienu_incl
+/output/FileName ./pienu#RUN#
+/control/execute config.mac
+/run/beamOn 1000000

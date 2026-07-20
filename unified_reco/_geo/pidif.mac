@@ -1,0 +1,5 @@
+
+/decay/pilifetimecap 100 ps
+/output/FileName ./pidif#RUN#
+/control/execute config.mac
+/run/beamOn 1000000

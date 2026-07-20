@@ -1,0 +1,5 @@
+
+/decay/mulifetimecap  50 ps
+/output/FileName ./mudif#RUN#
+/control/execute config.mac
+/run/beamOn 1000000

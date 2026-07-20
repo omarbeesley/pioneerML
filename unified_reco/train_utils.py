@@ -300,7 +300,7 @@ def event_builder_loss(outputs, batch, w_floor=0.05):
         atar_energy_valid = atar_energy[hit_is_valid]
 
         bce_atar = F.binary_cross_entropy(
-            p_atar_broadcast.clamp(1e-6, 1-1e-6), atar_targets_valid, reduction='none')
+            p_atar_broadcast.nan_to_num(0.5).clamp(1e-6, 1-1e-6), atar_targets_valid, reduction='none')
         weighted_loss_atar = bce_atar * atar_energy_valid
 
         num_valid_slices = num_atar_tokens
@@ -355,7 +355,7 @@ def event_builder_loss(outputs, batch, w_floor=0.05):
 
         # --- Per-hit BCE with class weighting ---
         bce_per_hit = F.binary_cross_entropy(
-            p_hit.clamp(1e-6, 1-1e-6), lyso_targets, reduction='none')
+            p_hit.nan_to_num(0.5).clamp(1e-6, 1-1e-6), lyso_targets, reduction='none')
         pos_weight = 3.0
         class_weight = torch.where(lyso_targets > 0.5, pos_weight, 1.0)
         bce_per_hit = bce_per_hit * class_weight
@@ -478,6 +478,20 @@ class PURITYLoss(nn.Module):
             l_slice = self.bce_logits(outputs['atar_slice_pdg'], targets['tar_slice_pdg'])
             loss_dict['loss_slice_pdg'] = l_slice
             total_loss += w_slice * l_slice
+
+        # 2b. Per-slice trigger (positron-slice) classifier. The ATAR-only tail model
+        # emits per-valid-slice `atar_trigger_logits`; supervising it is what makes
+        # "focus on the positron slice" real for the muDIF head. Guarded + default-off
+        # (+ shape check, same per-slice alignment as slice_pdg) so the full PURITY
+        # trainer, which has no 'w_slice_trigger' weight, is unaffected.
+        w_slice_trig = self.config.get('w_slice_trigger', 0.0)
+        if (w_slice_trig > 0.0 and 'atar_trigger_logits' in outputs
+                and 'tar_slice_trigger' in targets
+                and outputs['atar_trigger_logits'].shape == targets['tar_slice_trigger'].shape):
+            l_slice_trig = self.bce_logits(outputs['atar_trigger_logits'],
+                                           targets['tar_slice_trigger'])
+            loss_dict['loss_slice_trigger'] = l_slice_trig
+            total_loss += w_slice_trig * l_slice_trig
             
         # 3. ATAR Trigger Slice Loss (Phase 9) — role-based attachment.
         # Replaces per-slice BCE: for each non-anchor slice, the head outputs
@@ -527,6 +541,28 @@ class PURITYLoss(nn.Module):
             loss_dict['loss_composition'] = l_composition
             loss_dict['loss_trigger_slice'] = l_trigger_slice
             total_loss += w_trigger_slice * l_trigger_slice
+
+            # 3.2 Chain-positron EXCLUSIVITY — exactly one e+ in the triggering chain.
+            # The relu(sum-1)^2 composition above only fires once the per-event e+ mass
+            # EXCEEDS 1, so the observed failure (true slice P~0.55 + accidental P~0.5,
+            # BOTH above the 0.5 readout threshold) is barely penalized, and the time
+            # readout then averages two positrons (pileup e+ threading the stop region
+            # fakes a prompt pi->e). This term is "total minus best": any e+ probability
+            # on a SECOND slice is penalized LINEARLY, and it is zero when the mass sits
+            # on one slice — the structural prior that the chain has exactly one e+.
+            w_excl = self.config.get('w_chain_exclusive', 0.0)
+            if (w_excl > 0.0 and slice_event_idx is not None
+                    and slice_event_idx.numel() > 0):
+                s_e = role_probs[:, 2] * (~is_anchor).float()        # e+ mass, non-anchor
+                e_sum_na = role_logits.new_zeros(num_events)
+                e_sum_na.index_add_(0, slice_event_idx, s_e)         # per-event total e+
+                e_max = role_logits.new_zeros(num_events)
+                e_max.index_reduce_(0, slice_event_idx, s_e, 'amax',
+                                    include_self=True)               # per-event best e+
+                extra_e = (e_sum_na - e_max).clamp(min=0.0)          # mass on 2nd, 3rd...
+                l_exclusive = extra_e.mean()
+                loss_dict['loss_chain_exclusive'] = l_exclusive
+                total_loss += w_excl * l_exclusive
 
         # 3.5 Trigger-positron time-spread loss
         # Physics: the trigger positron is a single track confined to one slice

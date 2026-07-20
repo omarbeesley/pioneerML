@@ -38,7 +38,8 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 # --- GLOBALS & CONSTANTS ---
-kPidif = 0x0000000010
+kPidif = 0x0000000010   # PION decay-in-flight  (skim below drops these)
+kMudif = 0x0000001000   # MUON decay-in-flight  (kept; recorded via event_type)
 
 PION      = 0b000001
 MUON      = 0b000010
@@ -95,7 +96,7 @@ def smear_atar(energy, energy_resolution=0.15):
     valid_energies = energy[mask]
     stdv = valid_energies * energy_resolution
     noise = np.random.randn(len(valid_energies)) * stdv
-    smeared_energy[mask] = valid_energies + noise
+    smeared_energy[mask] = np.maximum(valid_energies + noise, 0.0)
     return smeared_energy
 
 
@@ -113,7 +114,36 @@ PARQUET_NAMES = [
     'dead_E',
     'atar_posE',
     'live_E',
+    # --- event-level truth for DIF labelling / rate reweighting ---
+    'event_type',      # full PIEventType bitmask: kMudif=0x1000 (muon DIF),
+                       #   kPidif=0x10 (pion DIF), kPienu, kPidar|kMudar, kMuwgt, ...
+    'gen_weight',      # info.GetWeight(): lifetime-bias weight (1.0 if unbiased)
+    'muon_decay_ke',   # muon kinetic energy at decay (MeV); >0 iff muon DIF
+    'pion_decay_ke',   # pion kinetic energy at decay (MeV); >0 iff pion DIF (kPidif)
+    # --- DTAR (degrader, VID 99999) beam trigger ---
+    'dtar_edep',       # max energy deposited in the degrader (MeV) this event
+    'dtar_triggered',  # 1 iff dtar_edep > 0.5 (the beam trigger). Events with 0 are
+                       #   normally dropped; kept only under --keep_untriggered (michel
+                       #   calo-pileup donors: beam missed the degrader trigger).
 ]
+
+
+# Explicit per-column Arrow types. Pinning these (rather than letting pa.array
+# infer per shard) guarantees every shard has an identical schema even when an
+# early shard happens to have an all-empty ragged column. Otherwise PyArrow
+# infers a null list type for that shard's column and later shards fail the
+# `table.cast(schema, safe=False)` in _flush (or silently corrupt).
+_LIST_F64 = pa.list_(pa.float64())
+_LIST_I64 = pa.list_(pa.int64())
+PARQUET_TYPES = {name: pa.float64() for name in PARQUET_NAMES}  # scalars default to f64
+PARQUET_TYPES['event_id'] = pa.int64()
+PARQUET_TYPES['event_type'] = pa.int64()
+PARQUET_TYPES['dtar_triggered'] = pa.int64()
+for _c in ('atar_x', 'atar_y', 'atar_z', 'atar_t', 'atar_truth_t', 'atar_E',
+           'lyso_x', 'lyso_y', 'lyso_z', 'lyso_t', 'lyso_E'):
+    PARQUET_TYPES[_c] = _LIST_F64
+for _c in ('atar_view', 'atar_pdg', 'atar_slice_id', 'lyso_pdg'):
+    PARQUET_TYPES[_c] = _LIST_I64
 
 
 def _make_accumulator():
@@ -122,21 +152,27 @@ def _make_accumulator():
 
 
 def _build_table(acc):
-    """Build a PyArrow Table from an accumulator dict."""
-    arrays = []
-    for name in PARQUET_NAMES:
-        if name in ('dead_E', 'atar_posE', 'live_E'):
-            arrays.append(pa.array(acc[name], type=pa.float64()))
-        else:
-            arrays.append(pa.array(acc[name]))
+    """Build a PyArrow Table from an accumulator dict, with explicit per-column
+    types (PARQUET_TYPES) so every shard's schema is identical."""
+    arrays = [pa.array(acc[name], type=PARQUET_TYPES[name]) for name in PARQUET_NAMES]
     return pa.Table.from_arrays(arrays, names=PARQUET_NAMES)
 
 
-def process_root_file(file_list, geoheader, output_file, max_events=None, shard_size=100000):
+def process_root_file(file_list, geoheader, output_file, max_events=None, shard_size=100000,
+                      keep_pidif=False, seed=None, event_id_offset=0, show_progress=True,
+                      keep_untriggered=False):
     """
     Parses a list of ROOT files and directly flattens EVERY hit sequentially into a Parquet-ready dictionary/list.
     Flushes to disk every `shard_size` events to bound peak RAM.
     """
+    # Seed the numpy RNG so the per-hit ATAR/LYSO energy+time smearing is
+    # reproducible. Previously only the file-shuffle order was seeded; all four
+    # smearing draws used the unseeded global RNG, so reruns produced different
+    # data and parallel array tasks could not be reproduced.
+    if seed is not None:
+        np.random.seed(seed & 0xFFFFFFFF)
+        print(f"Seeded numpy RNG with {seed & 0xFFFFFFFF} (smearing is reproducible)")
+
     chain = ROOT.TChain("sim")
     if isinstance(file_list, str):
         chain.Add(file_list)
@@ -144,17 +180,18 @@ def process_root_file(file_list, geoheader, output_file, max_events=None, shard_
         for f in file_list:
             print(f"Adding {f} to chain...")
             chain.Add(f)
-    entries = chain.GetEntries()
-    if max_events is not None:
-        entries = min(entries, max_events)
+    total_entries = chain.GetEntries()
         
-    print(f"Total entries to process: {entries}")
+    print(f"Total entries in chain: {total_entries}")
+    if max_events is not None:
+        print(f"Target: write up to {max_events} events (after skims)")
     print(f"Shard size: {shard_size} events (flush to disk to bound RAM)")
 
     acc = _make_accumulator()
     writer = None
     schema = None
     n_written = 0
+    n_caloid_mismatch = 0  # calo crystals whose GetCaloID() isn't a LYSO volume id (pass-4 guard)
 
     def _flush():
         nonlocal writer, schema, n_written
@@ -172,21 +209,29 @@ def process_root_file(file_list, geoheader, output_file, max_events=None, shard_
         for k in acc:
             acc[k].clear()
 
-    for i, entry in tqdm(enumerate(chain), total=entries):
-        if i >= entries: break
+    for i, entry in tqdm(enumerate(chain), total=total_entries, disable=not show_progress):
         
         # 1. Base Quality Skims
         eventType = int(entry.info.GetType())
-        if eventType & kPidif:
+        # Pion-DIF is normally dropped. The dedicated piDIF sample is converted
+        # with --keep_pidif so the pion-DIF topology survives for that head's
+        # training; the mixer later purifies the pool to kPidif by bitmask.
+        if (eventType & kPidif) and not keep_pidif:
             continue
 
-        triggered = 0
+        # DTAR (degrader, VID 99999) beam trigger: the max degrader deposit must exceed
+        # 0.5 MeV. Events failing it are the beam that missed the degrader trigger; they
+        # are normally dropped, but under keep_untriggered they are KEPT and tagged
+        # (dtar_triggered=0) so the michel pool can supply them as calorimeter-pileup
+        # donors (the mixer requires dtar_triggered==1 for the TRIGGERING event only).
+        dtar_edep = 0.0
         for upstream in entry.upstream:
             if upstream.GetVID() == 99999:
-                if upstream.GetEdep() > 0.5:
-                    triggered = 1
-                    break
-        if not triggered:
+                e = upstream.GetEdep()
+                if e > dtar_edep:
+                    dtar_edep = e
+        triggered = 1 if dtar_edep > 0.5 else 0
+        if not triggered and not keep_untriggered:
             continue
 
         # 2. Extract Event Truths (Decay Kinematics)
@@ -211,6 +256,23 @@ def process_root_file(file_list, geoheader, output_file, max_events=None, shard_
                 
         if (thetaInit < 0) or (phiInit == -1000):
             continue
+
+        # Muon kinetic energy at its decay vertex (MeV). >0 => muon decay-in-flight.
+        # The kMudif bit in event_type is the binary label; this is the KE magnitude
+        # used for the DIF head's energy-weighted loss / reweighting.
+        muon_decay_ke = 0.0
+        for decay in entry.decay:
+            if decay.GetMotherPDGID() == -13:
+                muon_decay_ke = float(decay.GetMotherEnergy())
+                break
+
+        # Pion kinetic energy at its decay vertex (MeV). >0 => pion decay-in-flight
+        # (kPidif). The kPidif bit is the binary label; this is the KE magnitude.
+        pion_decay_ke = 0.0
+        for decay in entry.decay:
+            if decay.GetMotherPDGID() == 211:
+                pion_decay_ke = float(decay.GetMotherEnergy())
+                break
         #if np.degrees(thetaInit) > 130:
         #    continue
 
@@ -451,7 +513,7 @@ def process_root_file(file_list, geoheader, output_file, max_events=None, shard_
                     
                 # LYSO CALORIMETER PROCESSING
                 elif is_lyso_lookup[idx]:
-                    new_hit = {'x': float(ax), 'y': float(ay), 'z': float(az), 't': float(at), 'truth_t': float(truth_t[idx]), 'E': float(se), 'pdg_mask': pdg_mask}
+                    new_hit = {'x': float(ax), 'y': float(ay), 'z': float(az), 't': max(float(at), 0.05), 'truth_t': max(float(truth_t[idx]), 0.05), 'E': float(se), 'pdg_mask': pdg_mask}
                     if v_id not in event_hits_lyso: event_hits_lyso[v_id] = []
                     merge_hit(event_hits_lyso[v_id], new_hit, merge_window=10.0)
 
@@ -469,6 +531,15 @@ def process_root_file(file_list, geoheader, output_file, max_events=None, shard_
             if edep_total < 1e-4: continue
 
             c_id = int(crystal.GetCaloID())
+            # GUARD: pass 3 accumulates per-crystal truth keyed by GetVolume() (v_id);
+            # this residual subtracts using GetCaloID() (c_id). They coincide only if
+            # GetCaloID() returns ids in the LYSO volume numbering (verified true in the
+            # current geometry). If a c_id is NOT a LYSO volume, lyso_truth_per_crystal
+            # misses, the full deposit re-enters as residual (the historical double-count),
+            # and it would be stored under a stray key. Skip + tally instead.
+            if geoheader.GetDetectorType(c_id) != ROOT.PIDetectorType.kCalo:
+                n_caloid_mismatch += 1
+                continue
             edep_residual = edep_total - lyso_truth_per_crystal.get(c_id, 0.0)
             if edep_residual < 1e-4: continue  # fully accounted for by tracked hits
 
@@ -544,9 +615,9 @@ def process_root_file(file_list, geoheader, output_file, max_events=None, shard_
                 
             # Phase 2: Assign hits to the closest valid center
             atar_len = len(evt_atar_t)
-            for i in range(len(all_times)):
-                hit_time = all_times[i]
-                hit_is_lyso = is_lyso[i]
+            for hit_idx in range(len(all_times)):
+                hit_time = all_times[hit_idx]
+                hit_is_lyso = is_lyso[hit_idx]
                 window = 2.0 if hit_is_lyso else 1.0
                 
                 valid_centers = []
@@ -567,13 +638,14 @@ def process_root_file(file_list, geoheader, output_file, max_events=None, shard_
                             best_center = c_idx
                     slice_id = best_center
                     
-                if i < atar_len:
-                    evt_atar_slice[i] = slice_id
+                if hit_idx < atar_len:
+                    evt_atar_slice[hit_idx] = slice_id
                 else:
-                    evt_lyso_slice[i - atar_len] = slice_id
+                    evt_lyso_slice[hit_idx - atar_len] = slice_id
 
-        # We append regardless of length to maintain strict 1:1 event indexing
-        acc['event_id'].append(i)
+        # We append regardless of length to maintain strict 1:1 event indexing.
+        # event_id_offset keeps ids globally unique across parallel shards.
+        acc['event_id'].append(event_id_offset + i)
         
         acc['atar_x'].append(evt_atar_x)
         acc['atar_y'].append(evt_atar_y)
@@ -599,6 +671,13 @@ def process_root_file(file_list, geoheader, output_file, max_events=None, shard_
         acc['atar_posE'].append(float(evt_atar_posE))
         acc['live_E'].append(float(evt_atar_posE + evt_lyso_E_sum))
 
+        acc['event_type'].append(int(eventType))
+        acc['gen_weight'].append(float(entry.info.GetWeight()))
+        acc['muon_decay_ke'].append(float(muon_decay_ke))
+        acc['pion_decay_ke'].append(float(pion_decay_ke))
+        acc['dtar_edep'].append(float(dtar_edep))
+        acc['dtar_triggered'].append(int(triggered))
+
         acc['truth_theta'].append(float(thetaInit))
         acc['truth_phi'].append(float(phiInit))
         acc['truth_positron_energy'].append(float(positron_initial_energy))
@@ -623,11 +702,118 @@ def process_root_file(file_list, geoheader, output_file, max_events=None, shard_
         if len(acc['event_id']) >= shard_size:
             _flush()
 
+        # Cap on events WRITTEN (post-skim), not events scanned: stop once the
+        # accumulated + already-flushed kept count reaches max_events.
+        if max_events is not None and (n_written + len(acc['event_id'])) >= max_events:
+            break
+
     # Flush any remaining events.
     _flush()
     if writer is not None:
         writer.close()
+    if n_caloid_mismatch:
+        print(f"WARNING: {n_caloid_mismatch} calo crystals had a GetCaloID() that is not "
+              f"a LYSO volume id; their residual deposits were SKIPPED to avoid the "
+              f"double-count. The GetVolume()/GetCaloID() invariant is violated for this "
+              f"geometry — investigate before trusting live_E.")
     print(f"Done! Wrote {n_written} events to {output_file}")
+
+def _convert_shard(task):
+    """multiprocessing worker: convert one file subset to its own parquet part.
+
+    Runs in a freshly spawned process so PyROOT initializes cleanly; loads its own
+    GeoHeader and uses its own seed + event_id offset so the merged output is
+    globally consistent and reproducible. `task` is a plain (picklable) tuple.
+    """
+    (files, out_part, max_events, shard_size, keep_pidif, seed,
+     event_id_offset, show_progress, keep_untriggered) = task
+    layout = ROOT.TFile(files[0])
+    geo = layout.Get("GeoHeader")
+    if not geo:
+        print(f"Warning: GeoHeader missing from {files[0]}; worker output may be incomplete.")
+    process_root_file(files, geo, out_part, max_events=max_events, shard_size=shard_size,
+                      keep_pidif=keep_pidif, seed=seed, event_id_offset=event_id_offset,
+                      show_progress=show_progress, keep_untriggered=keep_untriggered)
+    return out_part
+
+
+def _concat_parquets(parts, output_file):
+    """Stream-concatenate shard parquet parts into a single output file. All parts
+    share the pinned PARQUET_TYPES schema, so row groups copy without re-typing."""
+    writer = None
+    total = 0
+    for p in parts:
+        pf = pq.ParquetFile(p)
+        if writer is None:
+            writer = pq.ParquetWriter(output_file, pf.schema_arrow)
+        for rg in range(pf.num_row_groups):
+            table = pf.read_row_group(rg)
+            writer.write_table(table)
+            total += table.num_rows
+    if writer is not None:
+        writer.close()
+    return total
+
+
+def run_parallel(file_list, output_file, nprocs, max_events=None, shard_size=100000,
+                 keep_pidif=False, seed=None, event_id_offset=0, keep_untriggered=False):
+    """Convert `file_list` with `nprocs` worker processes (file-sharded), then merge
+    the per-worker parquet parts into a single `output_file`. Falls back to a single
+    in-process conversion when nprocs <= 1 or there is only one input file. The loop
+    is embarrassingly parallel across files, so wall-time scales ~1/nprocs until the
+    shared ROOT-file read bandwidth saturates."""
+    import math
+    import multiprocessing as mp
+
+    nprocs = max(1, min(nprocs, len(file_list)))
+    if nprocs == 1:
+        layout = ROOT.TFile(file_list[0])
+        geo = layout.Get("GeoHeader")
+        if not geo:
+            print("Warning: GeoHeader missing from first file. Metadata might be incomplete.")
+        process_root_file(file_list, geo, output_file, max_events=max_events,
+                          shard_size=shard_size, keep_pidif=keep_pidif, seed=seed,
+                          event_id_offset=event_id_offset, keep_untriggered=keep_untriggered)
+        return
+
+    # Round-robin file assignment balances total bytes across workers.
+    chunks = [file_list[w::nprocs] for w in range(nprocs)]
+    # Each worker writes up to ceil(max_events / nprocs); the merged total is ~max_events
+    # (exact only when every shard has at least its share of surviving events).
+    per_worker_max = None if max_events is None else math.ceil(max_events / nprocs)
+
+    base, ext = os.path.splitext(output_file)
+    if not ext:
+        ext = ".parquet"
+    tasks = []
+    for w, files in enumerate(chunks):
+        if not files:
+            continue
+        out_part = f"{base}.part{w:03d}{ext}"
+        worker_seed = None if seed is None else (seed + w)
+        # Per-worker event_id offset keeps ids unique after the merge.
+        tasks.append((files, out_part, per_worker_max, shard_size, keep_pidif,
+                      worker_seed, event_id_offset + w * 10**9, False, keep_untriggered))
+
+    print(f"Converting {len(file_list)} files with {len(tasks)} worker processes "
+          f"(spawn); merging into {output_file}", flush=True)
+    ctx = mp.get_context("spawn")
+    with ctx.Pool(len(tasks)) as pool:
+        parts = pool.map(_convert_shard, tasks)
+
+    # A worker whose shard had zero surviving events writes no file; drop those.
+    parts = [p for p in parts if p and os.path.exists(p)]
+    if not parts:
+        print("No events survived the skim in any shard; nothing written.")
+        return
+    total = _concat_parquets(parts, output_file)
+    for p in parts:
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+    print(f"Done! Merged {len(parts)} shards ({total} events) -> {output_file}")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Convert PIONEER ROOT sim files to flattened Parquet datasets.")
@@ -636,9 +822,29 @@ if __name__ == "__main__":
     parser.add_argument("--max_events", type=int, default=None, help="Max total events to process across all files")
     parser.add_argument("--max_files", type=int, default=None, help="Max number of ROOT files to process in batch mode")
     parser.add_argument("--shuffle_files", action='store_true', help="Randomize ROOT file ordering before chaining")
-    parser.add_argument("--seed", type=int, default=None, help="RNG seed for --shuffle_files (reproducible)")
+    parser.add_argument("--seed", type=int, default=None,
+                        help="RNG seed for BOTH file shuffle and per-hit smearing; makes the "
+                             "dataset reproducible. For SLURM arrays pass a distinct seed per "
+                             "task, e.g. --seed $SLURM_ARRAY_TASK_ID.")
     parser.add_argument("--shard_size", type=int, default=100000,
                         help="Flush to disk every N events to bound RAM (default 100k)")
+    parser.add_argument("--keep_pidif", action='store_true',
+                        help="Keep pion-DIF (kPidif) events instead of skimming them out. "
+                             "Use for the dedicated piDIF sample; leave off for pie/michel/muDIF.")
+    parser.add_argument("--nprocs", type=int, default=1,
+                        help="Worker processes (file-sharded). >1 converts file shards in "
+                             "parallel and merges them into a single --output. Capped at the "
+                             "input file count. Default 1 (single process, unchanged behavior).")
+    parser.add_argument("--event_id_offset", type=int, default=0,
+                        help="Added to every event_id. Use a distinct base per SLURM array "
+                             "task (e.g. $((SLURM_ARRAY_TASK_ID * 1000000000))) so shards from "
+                             "separate tasks keep globally-unique event_ids.")
+    parser.add_argument("--keep_untriggered", action='store_true',
+                        help="Keep events that FAIL the DTAR degrader trigger (dtar_edep<=0.5), "
+                             "tagged dtar_triggered=0, instead of dropping them. Use for the michel "
+                             "pool so its beam-missed-the-degrader decays are available as "
+                             "calorimeter-pileup donors; the mixer still requires dtar_triggered==1 "
+                             "for the TRIGGERING event. Leave off for pie/muDIF/piDIF trigger samples.")
     args = parser.parse_args()
 
     # 1. Resolve Input Files
@@ -660,13 +866,9 @@ if __name__ == "__main__":
         print(f"Capping input at {args.max_files} files (Found {len(file_list)})")
         file_list = file_list[:args.max_files]
 
-    # 2. Load Layout Dependencies from the FIRST file
-    print(f"Extracting headers from {file_list[0]}...")
-    layout_file = ROOT.TFile(file_list[0])
-    geo_header = layout_file.Get("GeoHeader")
-
-    if not geo_header:
-        print("Warning: GeoHeader missing from first file. Metadata might be incomplete.")
-
-    # 3. Process
-    process_root_file(file_list, geo_header, args.output, max_events=args.max_events, shard_size=args.shard_size)
+    # 2. Convert — single process, or file-sharded across --nprocs workers.
+    #    GeoHeader is loaded per worker inside run_parallel so each spawned PyROOT
+    #    process initializes cleanly and reads its own geometry.
+    run_parallel(file_list, args.output, args.nprocs, max_events=args.max_events,
+                 shard_size=args.shard_size, keep_pidif=args.keep_pidif, seed=args.seed,
+                 event_id_offset=args.event_id_offset, keep_untriggered=args.keep_untriggered)

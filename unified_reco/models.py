@@ -197,10 +197,16 @@ def build_atar_edge_attr(x, edge_index):
 
 def build_lyso_edge_attr(x, edge_index):
     """
-    5D LYSO-only intra-slice edge features: [dx, dy, dz, dE, dt]
+    5D LYSO-only intra-slice edge features: [dx, dy, dz, dE, |dt|]
 
-    Genuine 3D crystal positions — no projection ambiguity.
-    Time is retained because shower components have measurable timing differences.
+    Genuine 3D crystal positions — no projection ambiguity.  Time enters ONLY as the
+    MAGNITUDE of the pairwise difference |dt|: shower components have measurable timing
+    SEPARATIONS (the clustering-relevant quantity), but the absolute time and the sign/
+    ordering must never reach the model.  If they do, it learns a time-dependent acceptance
+    of old muons — rejecting positrons whose matched calo cluster sits at negative absolute
+    time — which depletes the negative-time sideband and biases R_e/mu.  |dt| is invariant
+    under a global time shift AND under time reversal, so it carries clustering proximity
+    with no absolute-time leak.
     """
     if edge_index.numel() == 0:
         return torch.zeros((0, 5), dtype=torch.float, device=x.device)
@@ -208,7 +214,8 @@ def build_lyso_edge_attr(x, edge_index):
     src, dst = edge_index
     u, v = x[src], x[dst]
 
-    out = v[:, :5] - u[:, :5]  # [dx, dy, dz, dE, dt]
+    out = v[:, :5] - u[:, :5]      # [dx, dy, dz, dE, dt]
+    out[:, 4] = out[:, 4].abs()    # time -> |dt| magnitude only (no absolute time, no ordering)
     return out
 
 class PURITYHybridModel(nn.Module):

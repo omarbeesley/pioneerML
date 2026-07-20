@@ -153,12 +153,15 @@ class PURITYDataset(Dataset):
     Reads mixed Parquet events built from PileupMixer and automatically formats them 
     into PyG Data objects suitable for the PURITY Transformer.
     """
-    def __init__(self, parquet_path, max_hits=300, max_events=None):
+    def __init__(self, parquet_path=None, max_hits=300, max_events=None, dataframe=None):
         super().__init__(root=None, transform=None, pre_transform=None)
+        self._verbose = dataframe is None
 
-        print(f"Loading merged parquet dataset from {parquet_path}...")
-
-        if max_events is not None:
+        if dataframe is not None:
+            # Pre-loaded chunk (e.g. one shard during streaming eval).
+            self.df = dataframe.reset_index(drop=True)
+        elif max_events is not None:
+            print(f"Loading merged parquet dataset from {parquet_path}...")
             # Read a random subset of row groups to bound RAM usage.
             import pyarrow.parquet as pq
             pf = pq.ParquetFile(parquet_path)
@@ -197,6 +200,7 @@ class PURITYDataset(Dataset):
             else:
                 self.df = pd.read_parquet(parquet_path)
         else:
+            print(f"Loading merged parquet dataset from {parquet_path}...")
             self.df = pd.read_parquet(parquet_path)
 
         # Pre-filter events with more than max_hits (OOM constraint)
@@ -207,7 +211,8 @@ class PURITYDataset(Dataset):
         initial_len = len(self.df)
         self.df = self.df[(total_hits > 0) & (total_hits <= max_hits)].reset_index(drop=True)
         final_len = len(self.df)
-        print(f"Dropped {initial_len - final_len} events exceeding {max_hits} hits or containing 0 hits. Active dataset size: {final_len}")
+        if self._verbose:
+            print(f"Dropped {initial_len - final_len} events exceeding {max_hits} hits or containing 0 hits. Active dataset size: {final_len}")
 
     def len(self):
         return len(self.df)
@@ -474,6 +479,32 @@ class PURITYDataset(Dataset):
         data.atar_pion_stop_target = pstops.unsqueeze(0).repeat(num_slices if n_atar > 0 else 0, 1)
             
         data.positron_initial_energy_target = torch.tensor([row.get('truth_positron_energy', 0.0)], dtype=torch.float)
+        # Truth decay time (ns) and acceptance flag — carried through for the
+        # tail-reveal eval (score-vs-energy / score-vs-time flatness checks).
+        # truth_positron_t uses a -1000 sentinel for out-of-window positrons.
+        data.positron_t_target = torch.tensor([row.get('truth_positron_t', -1000.0)], dtype=torch.float)
+        data.acceptance_target = torch.tensor([row.get('truth_acceptance', 0.0)], dtype=torch.float)
+        # The kinematics that DEFINE acceptance (positron angle < 120 deg + pion-stop
+        # fiducial 1.2<z<4.8, |x|<8, |y|<8). Carried through so the eval parquet can
+        # support acceptance-bias plots (cut efficiency vs angle / fiducial position).
+        data.positron_theta_target = torch.tensor([row.get('truth_theta', 0.0)], dtype=torch.float)
+        data.pion_stop_x_target = torch.tensor([float(row.get('truth_pion_stop_x', 0.0))], dtype=torch.float)
+        data.pion_stop_y_target = torch.tensor([float(row.get('truth_pion_stop_y', 0.0))], dtype=torch.float)
+        data.pion_stop_z_target = torch.tensor([float(row.get('truth_pion_stop_z', 0.0))], dtype=torch.float)
+        # Truth muon travel distance |muon_stop - muon_start| (mm) — the muDIF head
+        # regresses this (loss masked to muDIF, weighted toward short range). For muDIF
+        # the muon is born at the pion stop and decays in flight, so this is its range.
+        _ms = np.array([row.get('truth_muon_start_x', 0.0), row.get('truth_muon_start_y', 0.0),
+                        row.get('truth_muon_start_z', 0.0)], dtype=float)
+        _me = np.array([row.get('truth_muon_stop_x', 0.0), row.get('truth_muon_stop_y', 0.0),
+                        row.get('truth_muon_stop_z', 0.0)], dtype=float)
+        _mdist = float(np.sqrt(np.sum((_me - _ms) ** 2))) if np.all(np.isfinite(_me - _ms)) else 0.0
+        data.muon_travel_target = torch.tensor([_mdist], dtype=torch.float)
+        # Truth DEPOSITED energy (live calorimeter) — the energy-domain variable
+        # for R_e/mu binning; carried through for the tail-reveal eval. Plus the
+        # ATAR positron energy. (dead_E added just below.)
+        data.live_E_target = torch.tensor([float(row.get('live_E', 0.0))], dtype=torch.float)
+        data.atar_posE_target = torch.tensor([float(row.get('atar_posE', 0.0))], dtype=torch.float)
 
         # Truth dead-material energy loss (positron + descendants only).
         # Carries through from root_to_parquet → pileup_mixer.
@@ -547,16 +578,62 @@ class PURITYDataset(Dataset):
             [float(row.get('truth_has_muon', 0))], dtype=torch.float)
         data.pileup_present_target = torch.tensor(
             [float(row.get('truth_has_atar_pileup', 0))], dtype=torch.float)
+        # muon-decay-in-flight (muDIF) per-event truth for its own veto head.
+        # muon_dif_present = in-flight muon visible (feature-matched head target);
+        # is_mudif = source-class flag (eval denominator); muon_decay_ke = muon KE
+        # at decay (MeV, >0 iff muDIF); gen_weight = lifetime-bias weight to recover
+        # physical rates. Defaults keep older mixed parquets working.
+        data.muon_dif_present_target = torch.tensor(
+            [float(row.get('truth_has_muon_dif', 0))], dtype=torch.float)
+        data.is_mudif_target       = torch.tensor(
+            [float(row.get('truth_is_mudif', 0))], dtype=torch.float)
+        data.muon_decay_ke_target  = torch.tensor(
+            [float(row.get('muon_decay_ke', 0.0))], dtype=torch.float)
+        data.gen_weight            = torch.tensor(
+            [float(row.get('gen_weight', 1.0))], dtype=torch.float)
+        # pion-decay-in-flight (piDIF) per-event truth for its own veto head, mirroring
+        # muDIF: pidif_present = in-flight (DIF) pion visible (feature-matched head
+        # target); is_pidif = source-class flag (eval denominator); pion_decay_ke =
+        # pion KE at decay (MeV, >0 iff piDIF). Defaults keep older parquets working.
+        data.pidif_present_target  = torch.tensor(
+            [float(row.get('truth_has_pidif', 0))], dtype=torch.float)
+        data.is_pidif_target       = torch.tensor(
+            [float(row.get('truth_is_pidif', 0))], dtype=torch.float)
+        data.pion_decay_ke_target  = torch.tensor(
+            [float(row.get('pion_decay_ke', 0.0))], dtype=torch.float)
 
+        PION_BIT = 1  # 0b000001
         if n_atar > 0:
             atar_pdg_arr = np.array(atar_pdg, dtype=int)
             atar_origin_arr = np.array(atar_origin, dtype=int)
-            data.muon_hit_target   = torch.tensor(
-                ((atar_pdg_arr & MUON_BIT) > 0).astype(np.float32))
-            data.pileup_hit_target = torch.tensor(
+            muon_pdg_mask = (atar_pdg_arr & MUON_BIT) > 0
+            # In-flight (muDIF) muon hits = muon-pdg hits from a muDIF trigger
+            # (origin 0). Pileup muons (origin>0) are mu-DAR -> muon veto. This
+            # keeps the muon-veto and muDIF heads orthogonal.
+            if bool(row.get('truth_is_mudif', 0)):
+                inflight_mask = muon_pdg_mask & (atar_origin_arr == 0)
+            else:
+                inflight_mask = np.zeros(len(muon_pdg_mask), dtype=bool)
+            data.muon_hit_target     = torch.tensor(
+                (muon_pdg_mask & ~inflight_mask).astype(np.float32))   # stopped (muDAR)
+            data.muon_dif_hit_target = torch.tensor(
+                inflight_mask.astype(np.float32))                      # in-flight (muDIF)
+            data.pileup_hit_target   = torch.tensor(
                 (atar_origin_arr > 0).astype(np.float32))
+            # In-flight (piDIF) pion hits = pion-pdg hits from a piDIF trigger (origin
+            # 0): the DIF pion track that never Bragg-stops. Stopping pions (non-piDIF
+            # triggers) and pileup pions (origin>0) are excluded -> orthogonal head.
+            pion_pdg_mask = (atar_pdg_arr & PION_BIT) > 0
+            if bool(row.get('truth_is_pidif', 0)):
+                difpion_mask = pion_pdg_mask & (atar_origin_arr == 0)
+            else:
+                difpion_mask = np.zeros(len(pion_pdg_mask), dtype=bool)
+            data.pidif_hit_target    = torch.tensor(
+                difpion_mask.astype(np.float32))                       # in-flight pion (piDIF)
         else:
-            data.muon_hit_target   = torch.zeros(0, dtype=torch.float)
-            data.pileup_hit_target = torch.zeros(0, dtype=torch.float)
+            data.muon_hit_target     = torch.zeros(0, dtype=torch.float)
+            data.muon_dif_hit_target = torch.zeros(0, dtype=torch.float)
+            data.pileup_hit_target   = torch.zeros(0, dtype=torch.float)
+            data.pidif_hit_target    = torch.zeros(0, dtype=torch.float)
 
         return data

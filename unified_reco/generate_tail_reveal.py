@@ -35,30 +35,43 @@ import argparse
 import os
 import sys
 
+import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from unified_reco.pileup_mixer import PileupMixer
 
-DATA_DIR = "/mnt/c/Users/obbee/research/notebooks/ML/data/purity"
-RECO_DIR = os.path.dirname(os.path.abspath(__file__))
+# Defaults assume the cluster layout: unmixed parquets (from generate_unmixed.py)
+# live under prod_ml_data/unmixed_parquets, and the mixed tail_reveal_* outputs
+# are written alongside under prod_ml_data. Override with --data_dir / --out_dir
+# (e.g. when running in the host conda env with a different mount).
+DEFAULT_DATA_DIR = "/data/nvme0/prod_ml_data/unmixed_parquets"
+DEFAULT_OUT_DIR  = "/data/nvme0/prod_ml_data"
 
-# Per-split unmixed parquets produced by generate_unmixed.py
-SPLIT_FILES = {
-    "train": dict(
-        michel=os.path.join(DATA_DIR, "unmixed_michel_train.parquet"),
-        pie   =os.path.join(DATA_DIR, "unmixed_pie_train.parquet"),
-    ),
-    "val": dict(
-        michel=os.path.join(DATA_DIR, "unmixed_michel_val.parquet"),
-        pie   =os.path.join(DATA_DIR, "unmixed_pie_val.parquet"),
-    ),
-    "eval": dict(
-        michel=os.path.join(DATA_DIR, "unmixed_michel_eval.parquet"),
-        pie   =os.path.join(DATA_DIR, "unmixed_pie_eval.parquet"),
-    ),
-}
+
+def split_files(data_dir):
+    """Per-split unmixed parquets produced by generate_unmixed.py."""
+    return {
+        "train": dict(
+            michel=os.path.join(data_dir, "unmixed_michel_train.parquet"),
+            pie   =os.path.join(data_dir, "unmixed_pie_train.parquet"),
+            mudif =os.path.join(data_dir, "unmixed_mudif_train.parquet"),
+            pidif =os.path.join(data_dir, "unmixed_pidif_train.parquet"),
+        ),
+        "val": dict(
+            michel=os.path.join(data_dir, "unmixed_michel_val.parquet"),
+            pie   =os.path.join(data_dir, "unmixed_pie_val.parquet"),
+            mudif =os.path.join(data_dir, "unmixed_mudif_val.parquet"),
+            pidif =os.path.join(data_dir, "unmixed_pidif_val.parquet"),
+        ),
+        "eval": dict(
+            michel=os.path.join(data_dir, "unmixed_michel_eval.parquet"),
+            pie   =os.path.join(data_dir, "unmixed_pie_eval.parquet"),
+            mudif =os.path.join(data_dir, "unmixed_mudif_eval.parquet"),
+            pidif =os.path.join(data_dir, "unmixed_pidif_eval.parquet"),
+        ),
+    }
 
 # Pileup-mixer settings shared by training and validation (the two 'mixed' jobs).
 TRAIN_VAL_OPTS = dict(
@@ -68,7 +81,9 @@ TRAIN_VAL_OPTS = dict(
     radio_rate=2e7,
     enforce_window=True,     # retry until primary positron survives the readout window
     trigger_gap_ns=2.0,
-    pie_mix_fraction=0.1,    # 80% michel / 20% pie — oversample hard michel events
+    pie_mix_fraction=0.1,    # overridden by --pie_mix_fraction
+    mudif_mix_fraction=0.0,  # overridden by --mudif_mix_fraction (0 disables muDIF)
+    pidif_mix_fraction=0.0,  # overridden by --pidif_mix_fraction (0 disables piDIF)
     max_reroll=3,
 )
 
@@ -98,34 +113,40 @@ BENCHMARK_OPTS_IN_WIN = dict(
 
 def _job_specs(args):
     """Build the job specifications using CLI-controlled event counts."""
+    # Mixed train/val opts with CLI-controlled source-class fractions.
+    # pie + mudif + pidif fractions are drawn first; michel takes the remainder.
+    train_val_opts = dict(TRAIN_VAL_OPTS,
+                          pie_mix_fraction=args.pie_mix_fraction,
+                          mudif_mix_fraction=args.mudif_mix_fraction,
+                          pidif_mix_fraction=args.pidif_mix_fraction)
     return {
         "training": dict(
             split="train",
             mode="mixed",
             num_events=args.num_train,
-            opts=TRAIN_VAL_OPTS,
-            out=os.path.join(RECO_DIR, "tail_reveal_training", "data.parquet"),
+            opts=train_val_opts,
+            out=os.path.join(args.out_dir,"tail_reveal_training.parquet"),
         ),
         "validation": dict(
             split="val",
             mode="mixed",
             num_events=args.num_val,
-            opts=TRAIN_VAL_OPTS,
-            out=os.path.join(RECO_DIR, "tail_reveal_validation", "data.parquet"),
+            opts=train_val_opts,
+            out=os.path.join(args.out_dir,"tail_reveal_validation.parquet"),
         ),
         "michel_eval": dict(
             split="eval",
             mode="michel",
             num_events=args.num_eval,
             opts=BENCHMARK_OPTS_OPEN,
-            out=os.path.join(RECO_DIR, "tail_reveal_michel_eval", "data.parquet"),
+            out=os.path.join(args.out_dir,"tail_reveal_michel_eval.parquet"),
         ),
         "michel_eval_in_win": dict(
             split="eval",
             mode="michel",
             num_events=args.num_eval,
             opts=BENCHMARK_OPTS_IN_WIN,
-            out=os.path.join(RECO_DIR, "tail_reveal_michel_eval_in_win", "data.parquet"),
+            out=os.path.join(args.out_dir,"tail_reveal_michel_eval_in_win.parquet"),
         ),
         # Pie-only eval: pi → e ν events, no Michel chain. Needed as the
         # "signal positive" population for any tail-reveal classifier ROC
@@ -137,7 +158,27 @@ def _job_specs(args):
             mode="pie",
             num_events=args.num_eval,
             opts=BENCHMARK_OPTS_IN_WIN,
-            out=os.path.join(RECO_DIR, "tail_reveal_pie_eval", "data.parquet"),
+            out=os.path.join(args.out_dir,"tail_reveal_pie_eval.parquet"),
+        ),
+        # muon-decay-in-flight only (pi-DAR -> mu-DIF -> e). Prompt, boosted
+        # positrons that survive timing/energy cuts: the population a muDIF
+        # veto head must reject. enforce_window=True like pie_eval.
+        "mudif_eval": dict(
+            split="eval",
+            mode="mudif",
+            num_events=args.num_eval,
+            opts=BENCHMARK_OPTS_IN_WIN,
+            out=os.path.join(args.out_dir,"tail_reveal_mudif_eval.parquet"),
+        ),
+        # pion-decay-in-flight only (pi-DIF -> mu-DAR -> e). An ordinary Michel
+        # positron landing in the pi->e nu low-energy TAIL, but with a pion that
+        # never Bragg-stopped: the population the piDIF veto head must reject.
+        "pidif_eval": dict(
+            split="eval",
+            mode="pidif",
+            num_events=args.num_eval,
+            opts=BENCHMARK_OPTS_IN_WIN,
+            out=os.path.join(args.out_dir,"tail_reveal_pidif_eval.parquet"),
         ),
     }
 
@@ -184,18 +225,66 @@ def main():
     parser.add_argument("--only",
                         choices=["training", "validation",
                                  "michel_eval", "michel_eval_in_win",
-                                 "pie_eval"],
+                                 "pie_eval", "mudif_eval", "pidif_eval"],
                         default=None,
-                        help="Run a single job instead of all five.")
+                        help="Run a single job instead of all of them.")
+    parser.add_argument("--pie_mix_fraction", type=float, default=0.1,
+                        help="Fraction of pi->e nu triggers in the mixed train/val jobs.")
+    parser.add_argument("--mudif_mix_fraction", type=float, default=0.0,
+                        help="Fraction of muon-decay-in-flight triggers in the mixed "
+                             "train/val jobs. 0 disables muDIF; >0 needs "
+                             "unmixed_mudif_*.parquet. michel takes the remainder.")
+    parser.add_argument("--pidif_mix_fraction", type=float, default=0.0,
+                        help="Fraction of pion-decay-in-flight triggers in the mixed "
+                             "train/val jobs. 0 disables piDIF; >0 needs "
+                             "unmixed_pidif_*.parquet. michel takes the remainder.")
     parser.add_argument("--num_train", type=int, default=200_000)
     parser.add_argument("--num_val",   type=int, default=20_000)
     parser.add_argument("--num_eval",  type=int, default=100_000)
     parser.add_argument("--chunk_size", type=int, default=100_000,
                         help="Events per parquet row-group; controls peak RAM.")
+    parser.add_argument("--data_dir", default=DEFAULT_DATA_DIR,
+                        help="Dir holding the unmixed_{michel,pie}_{train,val,eval}.parquet "
+                             "files from generate_unmixed.py.")
+    parser.add_argument("--out_dir", default=DEFAULT_OUT_DIR,
+                        help="Dir to write the 5 tail_reveal_*/data.parquet outputs.")
+    parser.add_argument("--lut_dir", default="/data/nvme0/test_ml_data/radio_LUTs",
+                        help="Dir with crystalLUT.npy + validLUT.npy for the "
+                             "radioactivity LUTs.")
+    parser.add_argument("--keep_rmd", action="store_true",
+                        help="KEEP radiative muon decays (kMurad) in the michel pool. Default: "
+                             "purged at mixer load (triggers, pileup donors, calo-only stream).")
+    parser.add_argument("--calo_michel_rate", type=float, default=0.0,
+                        help="Poisson rate/event of time-independent CALO-ONLY michel pileup "
+                             "(old-muon decays whose positron missed the ATAR). 0 disables "
+                             "(default); <0 = auto physical rate from the pool.")
+    parser.add_argument("--no_replace", action="store_true",
+                        help="Draw each pool primary at most once (no resampling / no reuse).")
+    parser.add_argument("--seed", type=int, default=None,
+                        help="Seed the numpy RNG so the mixed dataset is reproducible "
+                             "(pileup draws, time shifts, radioactivity). Seeded per-job so "
+                             "--only X reproduces regardless of the other jobs. For parallel "
+                             "runs pass a distinct seed per task.")
     args = parser.parse_args()
 
     specs = _job_specs(args)
+    for _s in specs.values():
+        _s["opts"]["no_replace"] = args.no_replace
+        _s["opts"]["calo_michel_rate"] = args.calo_michel_rate
     selected = [args.only] if args.only else list(specs.keys())
+    files_by_split = split_files(args.data_dir)
+
+    # In a full (no --only) run, silently skip mudif_eval when the muDIF eval
+    # parquet isn't present, so layouts without muDIF data still run cleanly.
+    if not args.only and "mudif_eval" in selected \
+            and not os.path.exists(files_by_split["eval"]["mudif"]):
+        print(f"[skip] mudif_eval: not found ({files_by_split['eval']['mudif']})")
+        selected.remove("mudif_eval")
+    # Likewise skip pidif_eval when the piDIF eval parquet isn't present.
+    if not args.only and "pidif_eval" in selected \
+            and not os.path.exists(files_by_split["eval"]["pidif"]):
+        print(f"[skip] pidif_eval: not found ({files_by_split['eval']['pidif']})")
+        selected.remove("pidif_eval")
 
     # Group jobs by source split so we instantiate one PileupMixer per split.
     by_split = {}
@@ -203,17 +292,41 @@ def main():
         by_split.setdefault(specs[name]["split"], []).append(name)
 
     for split, names in by_split.items():
-        files = SPLIT_FILES[split]
-        for p in (files["michel"], files["pie"]):
+        files = files_by_split[split]
+        modes = {specs[n]["mode"] for n in names}
+        # muDIF pool is needed for a pure 'mudif' job, or for a 'mixed' job when
+        # mudif_mix_fraction > 0. Otherwise it stays optional (older layouts
+        # without unmixed_mudif_*.parquet still run michel/pie jobs fine).
+        need_mudif = ("mudif" in modes) or (args.mudif_mix_fraction > 0 and "mixed" in modes)
+        # piDIF pool: needed for a pure 'pidif' job, or a 'mixed' job with
+        # pidif_mix_fraction > 0. Optional otherwise (layouts without piDIF data).
+        need_pidif = ("pidif" in modes) or (args.pidif_mix_fraction > 0 and "mixed" in modes)
+
+        required = [files["michel"], files["pie"]]
+        if need_mudif:
+            required.append(files["mudif"])
+        if need_pidif:
+            required.append(files["pidif"])
+        for p in required:
             if not os.path.exists(p):
                 raise FileNotFoundError(
                     f"Missing unmixed parquet for split '{split}': {p}\n"
                     f"Run generate_unmixed.py first."
                 )
+        # Load the muDIF / piDIF pools if needed, or simply if they're present.
+        mudif_path = files["mudif"] if (need_mudif or os.path.exists(files["mudif"])) else None
+        pidif_path = files["pidif"] if (need_pidif or os.path.exists(files["pidif"])) else None
         print(f"\n--- Loading PileupMixer for split={split} "
-              f"(michel={files['michel']}, pie={files['pie']})", flush=True)
-        mixer = PileupMixer(michel_path=files["michel"], pie_path=files["pie"])
+              f"(michel={files['michel']}, pie={files['pie']}, "
+              f"mudif={mudif_path}, pidif={pidif_path})", flush=True)
+        mixer_kw = {} if args.lut_dir is None else {"lut_dir": args.lut_dir}
+        mixer = PileupMixer(michel_path=files["michel"], pie_path=files["pie"],
+                            mudif_path=mudif_path, pidif_path=pidif_path,
+                            drop_rmd=not args.keep_rmd, **mixer_kw)
         for name in names:
+            if args.seed is not None:
+                # Per-job seed: reproducible AND independent of job order / other jobs.
+                np.random.seed((args.seed + sum(ord(c) for c in name)) & 0xFFFFFFFF)
             run_job(mixer, name, specs[name], chunk_size=args.chunk_size)
 
 

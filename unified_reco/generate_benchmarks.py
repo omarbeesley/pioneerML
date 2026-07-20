@@ -28,8 +28,8 @@ import pyarrow.parquet as pq
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from unified_reco.pileup_mixer import PileupMixer
 
-DATA_DIR = "/data/nvme0/prod_ml_data/unmixed_parquets/"
-RECO_DIR = "/data/nvme0/prod_ml_data/mixed_parquets/"
+DATA_DIR = "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/unmixed_split/"
+RECO_DIR = "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/mixed_standard/"
 
 # Per-split unmixed parquets produced by generate_unmixed.py
 SPLIT_FILES = {
@@ -49,9 +49,9 @@ SPLIT_FILES = {
 
 # Pileup-mixer settings shared by training and validation (the two 'mixed' jobs).
 TRAIN_VAL_OPTS = dict(
-    biased_fraction=0.05,
-    biased_sigma=5.0,
-    cal_only_fraction=0.1,
+    biased_fraction=0.1,     # user setting
+    biased_sigma=20.0,       # user setting
+    cal_only_fraction=0.5,   # user setting — heavy calo pileup augmentation
     radio_rate=2e7,
     enforce_window=True,     # retry until primary positron survives the readout window
     trigger_gap_ns=2.0,
@@ -60,10 +60,11 @@ TRAIN_VAL_OPTS = dict(
 )
 
 # Pileup-mixer settings shared by pie and pimu eval benchmarks.
+# EVAL IS UNBIASED: no biased/cal-only injection (must not carry train/val augmentation).
 BENCHMARK_OPTS = dict(
     biased_fraction=0.0,
     biased_sigma=100.0,
-    cal_only_fraction=0.1,
+    cal_only_fraction=0.0,   # user setting — eval must not have train/val biases
     radio_rate=2e7,
     enforce_window=False,
     trigger_gap_ns=2.0,
@@ -152,7 +153,18 @@ def main():
     parser.add_argument("--num_eval",  type=int, default=1000000)
     parser.add_argument("--chunk_size", type=int, default=100_000,
                         help="Events per parquet row-group; controls peak RAM.")
+    parser.add_argument("--out_dir", type=str, default=None,
+                        help="Override RECO_DIR output base (for sharded/parallel mixing).")
+    parser.add_argument("--seed", type=int, default=None,
+                        help="Seed the numpy RNG (use a distinct value per parallel shard).")
     args = parser.parse_args()
+
+    if args.seed is not None:
+        import numpy as _np
+        _np.random.seed(args.seed & 0xFFFFFFFF)
+    if args.out_dir:
+        global RECO_DIR
+        RECO_DIR = args.out_dir
 
     specs = _job_specs(args)
     selected = [args.only] if args.only else list(specs.keys())
@@ -172,7 +184,8 @@ def main():
                 )
         print(f"\n--- Loading PileupMixer for split={split} "
               f"(michel={files['michel']}, pie={files['pie']})", flush=True)
-        mixer = PileupMixer(michel_path=files["michel"], pie_path=files["pie"])
+        mixer = PileupMixer(michel_path=files["michel"], pie_path=files["pie"],
+                            lut_dir="/data/raid3/eliza7/PIONEER/data/ML_TEST")
         for name in names:
             run_job(mixer, name, specs[name], chunk_size=args.chunk_size)
 

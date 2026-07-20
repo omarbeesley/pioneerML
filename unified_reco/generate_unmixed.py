@@ -1,15 +1,22 @@
 """
-Generate six unmixed PURITY parquet datasets, one per (channel × split):
+Generate unmixed PURITY parquet datasets, one per (channel × split):
   pie/train, pie/val, pie/eval
   michel/train, michel/val, michel/eval
+  mudif/train, mudif/val, mudif/eval   (muon decay-in-flight: pi-DAR -> mu-DIF -> e)
+  pidif/train, pidif/val, pidif/eval   (pion decay-in-flight: pi-DIF -> mu-DAR -> e)
 
 Each is produced by invoking root_to_parquet.py on the corresponding
 sub-directory of ROOT files at:
-  /mnt/e/global_ai_recon/{pie,michel}/{train,val,eval}/*.root
+  {ROOT_BASE}/{pie,michel,mudif,pidif}/{train,val,eval}/*.root
+
+root_to_parquet keeps muDIF events automatically (its skim only drops
+*pion*-DIF, kPidif); muDIF events carry kMudif and a muon_decay_ke > 0. The
+piDIF channel is converted with --keep_pidif (added by run_job for that channel
+only) so pion-DIF survives; those events carry kPidif and a pion_decay_ke > 0.
 
 Usage:
-    python generate_unmixed.py                                # all six
-    python generate_unmixed.py --only pie_train               # one of the six
+    python generate_unmixed.py                                # all jobs
+    python generate_unmixed.py --only mudif_train             # one job
     python generate_unmixed.py --max_train 100000 --max_val 20000 --max_eval 100000
 """
 import argparse
@@ -28,6 +35,12 @@ JOBS = {
     "michel_train": dict(channel="michel", split="train", out_name="unmixed_michel_train.parquet"),
     "michel_val":   dict(channel="michel", split="val",   out_name="unmixed_michel_val.parquet"),
     "michel_eval":  dict(channel="michel", split="eval",  out_name="unmixed_michel_eval.parquet"),
+    "mudif_train":  dict(channel="mudif",  split="train", out_name="unmixed_mudif_train.parquet"),
+    "mudif_val":    dict(channel="mudif",  split="val",   out_name="unmixed_mudif_val.parquet"),
+    "mudif_eval":   dict(channel="mudif",  split="eval",  out_name="unmixed_mudif_eval.parquet"),
+    "pidif_train":  dict(channel="pidif",  split="train", out_name="unmixed_pidif_train.parquet"),
+    "pidif_val":    dict(channel="pidif",  split="val",   out_name="unmixed_pidif_val.parquet"),
+    "pidif_eval":   dict(channel="pidif",  split="eval",  out_name="unmixed_pidif_eval.parquet"),
 }
 
 
@@ -49,8 +62,19 @@ def run_job(name, spec, args):
     ]
     if args.shuffle_files:
         cmd.append("--shuffle_files")
-        if args.seed is not None:
-            cmd.extend(["--seed", str(args.seed)])
+    if args.seed is not None:
+        # Per-job seed: decorrelate the 12 jobs' smearing + file shuffle while
+        # staying reproducible. --seed now also seeds the per-hit smearing RNG
+        # (passed even without --shuffle_files).
+        job_seed = (args.seed + sum(ord(c) for c in name)) & 0xFFFFFFFF
+        cmd.extend(["--seed", str(job_seed)])
+    # The piDIF channel is the ONLY one converted with kPidif kept; every other
+    # channel keeps the default skim (drops pion-DIF contamination).
+    if spec["channel"] == "pidif":
+        cmd.append("--keep_pidif")
+
+    if args.nprocs and args.nprocs > 1:
+        cmd.extend(["--nprocs", str(args.nprocs)])
 
     print(f"\n=== [{name}] {spec['channel']}/{spec['split']}  "
           f"max_events={max_events}  ->  {output}", flush=True)
@@ -75,6 +99,9 @@ def main():
                         help="Pass --shuffle_files to root_to_parquet.")
     parser.add_argument("--seed", type=int, default=42,
                         help="RNG seed used with --shuffle_files.")
+    parser.add_argument("--nprocs", type=int, default=1,
+                        help="Worker processes per job, passed through to root_to_parquet "
+                             "--nprocs (file-sharded parallel conversion). Default 1.")
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)

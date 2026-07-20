@@ -1,0 +1,45 @@
+# =================================================================
+# gaussian beam on target
+
+# Configure pion beam
+/gen/select beam
+
+# Select beam phasespace definition
+# Options: pre-built, flexible
+/gen/beam flexible
+
+# Beam contaminations (0 - 1.00)
+/gen/beam/muons         0
+/gen/beam/positrons     0
+
+# Beam parameters
+# General beam parameters
+#/gen/beam/momentum             65 MeV
+#/gen/beam/momsigma            1.4 MeV
+#/gen/beam/xmean                 0 mm
+#/gen/beam/ymean                 0 mm
+#/gen/beam/zpos              -1000 mm
+
+# Select gaussian beam and set mode
+# Options are (gaus, cyl) for shape
+/gen/beam/shape                   gaus
+/gen/beam/gaus/mode               swaist_sprime
+/gen/beam/zpos                -500 mm
+/gen/beam/gaus/xwaistsigma    6.0 mm
+/gen/beam/gaus/ywaistsigma    6.0 mm
+/gen/beam/gaus/xprimesigma    0.17 
+/gen/beam/gaus/yprimesigma    0.07
+
+# Gaussian beam parameters
+#/gen/beam/gaus/mode               sinit_emittance
+#/gen/beam/gaus/zoff             0 mm
+#/gen/beam/gaus/xinitsigma      91 mm
+#/gen/beam/gaus/yinitsigma      54 mm
+#/gen/beam/gaus/xemittance    0.62 mm
+#/gen/beam/gaus/yemittance    0.23 mm
+#/gen/beam/gaus/xwaistsigma    6.8 mm
+#/gen/beam/gaus/ywaistsigma    4.3 mm
+#/gen/beam/gaus/xprimesigma   0.09 
+#/gen/beam/gaus/yprimesigma   0.05  
+
+# =================================================================

@@ -1,0 +1,31 @@
+# =================================================================
+# Cylindrical beam on target
+
+# Configure pion beam
+/gen/select beam
+
+# Select beam phasespace definition
+# Options: pre-built, flexible
+/gen/beam flexible
+
+# Beam contaminations (0 - 1.00)
+/gen/beam/muons         0
+/gen/beam/positrons     0
+
+# Beam parameters
+# General beam parameters
+#/gen/beam/momentum             65 MeV
+#/gen/beam/momsigma            1.4 MeV
+#/gen/beam/xmean                 0 mm
+#/gen/beam/ymean                 0 mm
+#/gen/beam/zpos              -1000 mm
+
+
+# Select gaussian beam and set mode
+# Options are (gaus, cyl) for shape
+/gen/beam/shape                   cyl
+
+# Cylindrical beam parameters
+#/gen/beam/cyl/rmax             10 mm
+
+# =================================================================

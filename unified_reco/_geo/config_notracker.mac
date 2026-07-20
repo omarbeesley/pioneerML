@@ -1,0 +1,69 @@
+
+###################################################################
+# geometry must be specified before /run/initialize               # 
+/geometry/source default_lyso_notracker.gdml
+
+# Configure magnetic fields
+# /magfield/scalingfactor          1
+
+# End of geometry configuration                                   # 
+###################################################################
+
+###################################################################
+# Configuration of the physics to be used                         # 
+
+/Physics/SelectList QGSP_BERT_EM4
+/process/had/verbose 0
+/process/em/verbose 0
+
+# Add optical physics.
+#/Physics/AddOptics
+#/process/optical/verbose 1
+#/process/optical/processActivation Cerenkov false
+#/process/optical/processActivation Scintillation false
+#/process/optical/processActivation OpAbsorption true
+#/process/optical/processActivation OpRayleigh true
+#/process/optical/processActivation OpMieHG true
+#/process/optical/processActivation OpBoundary true
+#/process/optical/processActivation OpWLS true
+#/process/optical/processActivation OpWLS2 true
+#
+#/process/optical/scintillation/verbose 1
+#/process/optical/scintillation/setByParticleType false
+#/process/optical/scintillation/setTrackInfo true
+#/process/optical/scintillation/setFiniteRiseTime false
+#/process/optical/scintillation/setStackPhotons true
+#/process/optical/scintillation/setTrackSecondariesFirst true
+
+# End of physics configuration                                    # 
+###################################################################
+
+###################################################################
+# Configuration of the output to be written                       # 
+
+# Switching on/off branches in the output TTree
+/output/SaveInit         true
+#/output/SaveTrack        true
+/output/SaveDecay        true
+/output/SaveAtar         true
+/output/SaveTracker      true
+/output/SaveCalo         true
+/output/SaveSipm         true
+/output/SaveUpstream     true
+#/output/SaveGhost        true
+#/output/SaveGhostCalo    true
+#/output/SaveSplitoff     true
+
+
+# End of output configuration                                     # 
+###################################################################
+
+#==================================================================
+# Initialise the run 
+/run/initialize
+
+#=================================================================
+# Source beam configuration
+
+/control/execute config_beam_gaus.mac
+

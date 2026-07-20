@@ -97,6 +97,27 @@ def run_inference(model, device, parquet_path, tag='', max_events=None,
         'atar_posE': df['atar_posE'].to_numpy(dtype=np.float32),
         'total_E':  (df['live_E'].to_numpy(dtype=np.float32)
                      + df['dead_E'].to_numpy(dtype=np.float32)),
+        # --- fields consumed by the R_e/mu analysis (purity_analysis/) ---
+        'event_id':  np.arange(n, dtype=np.int64),
+        'gen_weight': (df['gen_weight'].to_numpy(dtype=np.float64)
+                       if 'gen_weight' in df.columns else np.ones(n, dtype=np.float64)),
+        'positron_t': (df['truth_positron_t'].to_numpy(dtype=np.float32)
+                       if 'truth_positron_t' in df.columns else np.full(n, -1000., dtype=np.float32)),
+        'is_pie':    (df['truth_is_pie'].to_numpy(dtype=np.int8)
+                      if 'truth_is_pie' in df.columns else np.zeros(n, dtype=np.int8)),
+        'has_muon':  (df['truth_has_muon'].to_numpy(dtype=np.int8)
+                      if 'truth_has_muon' in df.columns else np.zeros(n, dtype=np.int8)),
+        'is_mudif':  (df['truth_is_mudif'].to_numpy(dtype=np.int8)
+                      if 'truth_is_mudif' in df.columns else np.zeros(n, dtype=np.int8)),
+        'is_pidif':  (df['truth_is_pidif'].to_numpy(dtype=np.int8)
+                      if 'truth_is_pidif' in df.columns else np.zeros(n, dtype=np.int8)),
+        'has_atar_pileup': (df['truth_has_atar_pileup'].to_numpy(dtype=np.int8)
+                            if 'truth_has_atar_pileup' in df.columns else np.zeros(n, dtype=np.int8)),
+        'has_accidental': (df['truth_has_accidental'].to_numpy(dtype=np.int8)
+                           if 'truth_has_accidental' in df.columns else np.zeros(n, dtype=np.int8)),
+        'accidental_positron_t': (df['truth_accidental_positron_t'].to_numpy(dtype=np.float32)
+                                  if 'truth_accidental_positron_t' in df.columns
+                                  else np.full(n, -1000., dtype=np.float32)),
     }
 
     # --- Prediction arrays ---
@@ -112,6 +133,9 @@ def run_inference(model, device, parquet_path, tag='', max_events=None,
         'pos_iou':         np.full(n, np.nan, dtype=np.float32),
         'dead_energy':     np.full(n, SENTINEL, dtype=np.float32),
         'positron_time_ns': np.full(n, SENTINEL, dtype=np.float32),
+        'positron_time_consensus_ns': np.full(n, SENTINEL, dtype=np.float32),
+        'positron_time_consensus_meanconf_ns': np.full(n, SENTINEL, dtype=np.float32),
+        'positron_time_argmax_role_ns': np.full(n, SENTINEL, dtype=np.float32),
         'positron_time_spread_ns': np.full(n, np.nan, dtype=np.float32),
         'positron_log_kappa': np.full(n, SENTINEL, dtype=np.float32),
     }
@@ -141,6 +165,10 @@ def run_inference(model, device, parquet_path, tag='', max_events=None,
     i0 = 0
     t0 = time.time()
     mc_desc = f'infer[{tag}]' if mc_passes <= 1 else f'infer[{tag}] MC×{mc_passes}'
+    # KEEP train() mode during eval — do NOT switch to model.eval(). For this graph net,
+    # eval() swaps in poorly-estimated running normalization (BatchNorm) statistics and
+    # degrades reconstruction; batch statistics (train mode) are the correct choice here.
+    # Dropout noise is averaged out by --mc_passes. (Deliberate; verified with the team.)
     model.train()
     with torch.inference_mode():
         for batch in tqdm(dl, desc=mc_desc):
@@ -224,6 +252,18 @@ def run_inference(model, device, parquet_path, tag='', max_events=None,
                     if pos_time_out is not None:
                         from unified_reco.constants import NORM_T_ATAR
                         preds['positron_time_ns'][sl] = pos_time_out.cpu().numpy()[:B] * NORM_T_ATAR
+                    pos_cons_out = out.get('positron_time_consensus')
+                    if pos_cons_out is not None:
+                        from unified_reco.constants import NORM_T_ATAR
+                        preds['positron_time_consensus_ns'][sl] = pos_cons_out.cpu().numpy()[:B] * NORM_T_ATAR
+                    pos_mc_out = out.get('positron_time_consensus_meanconf')
+                    if pos_mc_out is not None:
+                        from unified_reco.constants import NORM_T_ATAR
+                        preds['positron_time_consensus_meanconf_ns'][sl] = pos_mc_out.cpu().numpy()[:B] * NORM_T_ATAR
+                    pos_ar_out = out.get('positron_time_argmax_role')
+                    if pos_ar_out is not None:
+                        from unified_reco.constants import NORM_T_ATAR
+                        preds['positron_time_argmax_role_ns'][sl] = pos_ar_out.cpu().numpy()[:B] * NORM_T_ATAR
                     hit_trig_ts = out.get('atar_hit_trigger_prob')
                     hit_mip_ts = out.get('atar_hit_mip_prob')
                     if hit_trig_ts is not None and hit_mip_ts is not None:
@@ -321,7 +361,7 @@ def run_inference(model, device, parquet_path, tag='', max_events=None,
                 # Per-cluster timing (coinc_feat, dt_corr_ns, cluster_time)
                 coinc_out = out.get('lyso_coinc_feat')        # [Total_K]
                 dt_out = out.get('lyso_dt_corr_ns')           # [Total_K] ns
-                ct_out = out.get('lyso_cluster_times')        # [Total_K] ns (affinity-weighted — NOTE: diluted by radioactivity)
+                ct_out = out.get('lyso_cluster_times')        # [Total_K] ns. Affinity-weighted MEAN under models_v2 post 2026-07-11; under models.py (V1) or pre-fix code this was a size-scaled SUM (~n_hits x mean) — the old "diluted by radioactivity" note was that inflation, misattributed.
                 if coinc_out is not None and n_valid > 0:
                     coinc_np = coinc_out.cpu().numpy().reshape(n_valid, K)
                     dt_np = dt_out.cpu().numpy().reshape(n_valid, K) if dt_out is not None else np.full((n_valid, K), np.nan)
@@ -415,6 +455,17 @@ def save_event_parquet(truth, preds, output_path):
         'truth_atar_posE': truth['atar_posE'],
         'truth_total_E': truth['total_E'],
         'truth_htp': truth['htp'],
+        # --- fields for purity_analysis (R_e/mu) ---
+        'event_id': truth['event_id'],
+        'truth_gen_weight': truth['gen_weight'],
+        'truth_positron_t': truth['positron_t'],
+        'truth_is_pie': truth['is_pie'],
+        'truth_has_muon': truth['has_muon'],
+        'truth_is_mudif': truth['is_mudif'],
+        'truth_is_pidif': truth['is_pidif'],
+        'truth_has_atar_pileup': truth['has_atar_pileup'],
+        'truth_has_accidental': truth['has_accidental'],
+        'truth_accidental_positron_t': truth['accidental_positron_t'],
         'pred_accepted': preds['accepted'],
         'pred_pion_stop_x': preds['pion_stop'][:, 0],
         'pred_pion_stop_y': preds['pion_stop'][:, 1],
@@ -430,6 +481,9 @@ def save_event_parquet(truth, preds, output_path):
         'pred_pos_recall': preds['pos_recall'],
         'pred_pos_iou': preds['pos_iou'],
         'pred_positron_time_ns': preds['positron_time_ns'],
+        'pred_positron_time_consensus_ns': preds['positron_time_consensus_ns'],
+        'pred_positron_time_consensus_meanconf_ns': preds['positron_time_consensus_meanconf_ns'],
+        'pred_positron_time_argmax_role_ns': preds['positron_time_argmax_role_ns'],
         'pred_positron_time_spread_ns': preds['positron_time_spread_ns'],
         'pred_positron_log_kappa': preds['positron_log_kappa'],
     }
