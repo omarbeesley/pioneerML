@@ -153,13 +153,25 @@ class PURITYDataset(Dataset):
     Reads mixed Parquet events built from PileupMixer and automatically formats them 
     into PyG Data objects suitable for the PURITY Transformer.
     """
-    def __init__(self, parquet_path=None, max_hits=300, max_events=None, dataframe=None):
+    def __init__(self, parquet_path=None, max_hits=300, max_events=None, dataframe=None,
+                 row_groups=None):
         super().__init__(root=None, transform=None, pre_transform=None)
         self._verbose = dataframe is None
 
         if dataframe is not None:
             # Pre-loaded chunk (e.g. one shard during streaming eval).
             self.df = dataframe.reset_index(drop=True)
+        elif row_groups is not None:
+            # Chunked-epoch mode: read EXACTLY these row groups (deterministic, no
+            # repeats across epochs until the pool is exhausted — see train_purity
+            # --epoch_mode chunked). Whole groups only; no random subsampling.
+            print(f"Loading {len(row_groups)} row groups (chunked epoch) from {parquet_path}...")
+            import pyarrow.parquet as pq
+            import pyarrow as pa
+            pf = pq.ParquetFile(parquet_path)
+            table = pa.concat_tables([pf.read_row_group(int(g)) for g in sorted(row_groups)])
+            self.df = table.to_pandas()
+            del table
         elif max_events is not None:
             print(f"Loading merged parquet dataset from {parquet_path}...")
             # Read a random subset of row groups to bound RAM usage.

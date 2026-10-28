@@ -483,7 +483,11 @@ class PURITYLoss(nn.Module):
         # emits per-valid-slice `atar_trigger_logits`; supervising it is what makes
         # "focus on the positron slice" real for the muDIF head. Guarded + default-off
         # (+ shape check, same per-slice alignment as slice_pdg) so the full PURITY
-        # trainer, which has no 'w_slice_trigger' weight, is unaffected.
+        # trainer, which has no 'w_slice_trigger' weight, is unaffected. NOTE: this BCE
+        # supervises the in-chain readout 1−P(none)=P(µ)+P(e); it is deliberately NOT
+        # used for the main-model positron-recall push, which instead up-weights the
+        # role CE on the e-column below (avoids fighting the CE on role-0/trigger-1
+        # slices, and never rewards µ-column mass — see the asymmetric weight in §3).
         w_slice_trig = self.config.get('w_slice_trigger', 0.0)
         if (w_slice_trig > 0.0 and 'atar_trigger_logits' in outputs
                 and 'tar_slice_trigger' in targets
@@ -492,7 +496,7 @@ class PURITYLoss(nn.Module):
                                            targets['tar_slice_trigger'])
             loss_dict['loss_slice_trigger'] = l_slice_trig
             total_loss += w_slice_trig * l_slice_trig
-            
+
         # 3. ATAR Trigger Slice Loss (Phase 9) — role-based attachment.
         # Replaces per-slice BCE: for each non-anchor slice, the head outputs
         # a distribution over {none, μ-in-chain, e-in-chain}. The anchor pion
@@ -511,10 +515,23 @@ class PURITYLoss(nn.Module):
                                                 device=role_logits.device))
             slice_event_idx = outputs.get('atar_slice_event_idx')     # [N_valid]
 
+            # ASYMMETRIC positron recall: up-weight the CE on the e-column (class 2).
+            # Missing the trigger positron is an unrecoverable acceptance loss; a
+            # matched accidental is subtracted by the time fit — so predicting
+            # none/µ where the target is positron costs `role_ce_positron_weight`×,
+            # everything else costs 1. This pushes P(e) DIRECTLY (weighted mean over
+            # classes), so it agrees with the role assignment instead of fighting it
+            # on the shared 1−P(none) readout, and it never rewards µ-column mass.
+            # alpha=1 reproduces the original symmetric CE exactly (tail model / any
+            # config without the key is unaffected). Two-positron assignment stays
+            # policed by w_chain_exclusive + the composition penalty below.
             non_anchor = ~is_anchor
             if non_anchor.any() and role_targets.numel() == role_logits.size(0):
+                pos_w = self.config.get('role_ce_positron_weight', 1.0)
+                class_w = (torch.tensor([1.0, 1.0, pos_w], device=role_logits.device)
+                           if pos_w != 1.0 else None)
                 l_role_ce = F.cross_entropy(
-                    role_logits[non_anchor], role_targets[non_anchor]
+                    role_logits[non_anchor], role_targets[non_anchor], weight=class_w
                 )
             else:
                 l_role_ce = role_logits.new_zeros(())
@@ -686,16 +703,59 @@ class PURITYLoss(nn.Module):
         w_angle = self.config.get('w_positron_angle', 0.0)
         if w_angle > 0.0 and 'atar_positron_dir' in outputs and 'tar_angle_vec_per_graph' in targets:
             has_pos = batch.has_trigger_positron.bool()  # [B]
-            if has_pos.any():
-                pred_dir = outputs['atar_positron_dir'][has_pos]
-                tar_dir = targets['tar_angle_vec_per_graph'][has_pos]
+
+            # --- MATCH GATE ('angle_match_gate'): angle loss only on events whose TAGGED
+            # pool overlaps the TRUE trigger positron (>50% of its hits). Upstream failures
+            # give NO gradient here: unmatched terms were (a) teaching the empty-pool
+            # default the failure population's backward-tilted mean direction (the dz~-0.5
+            # default) and (b) injecting random wrong-object residuals (~1 vs core ~0.03,
+            # so one bad event outweighed ~30 good ones) into the head and shared trunk.
+            # LOOPHOLE SAFETY: the gate is a DETACHED truth-AND-prediction indicator (no
+            # gradient path to game it); the loss is MEAN-reduced, so dodging one event
+            # changes it by only ~(l-mu)/N; and untagging a true positron costs the
+            # alpha-weighted role CE first-order — dodging is strictly unprofitable.
+            # Tagging failures stay fully penalized by their own losses. Val tripwires:
+            # 'angle_match_rate' (recall proxy) and 'angle_dz_bias' (the walk metric).
+            gate = has_pos
+            if (self.config.get('angle_match_gate', False)
+                    and hasattr(batch, 'atar_node_pdg_target')
+                    and hasattr(batch, 'is_trigger_target')
+                    and 'atar_hit_trigger_prob' in outputs
+                    and 'atar_hit_mip_prob' in outputs):
+                is_atar = (batch.x[:, 5] > 0.5) | (batch.x[:, 6] > 0.5)
+                trig = outputs['atar_hit_trigger_prob'].detach().view(-1)
+                mip = outputs['atar_hit_mip_prob'].detach().view(-1)
+                pdg_t = batch.atar_node_pdg_target
+                if trig.numel() == int(is_atar.sum()) and pdg_t.size(0) == int(is_atar.sum()):
+                    gb = batch.batch[is_atar]
+                    pred_mask = (trig > 0.5) & (mip > 0.5)
+                    true_pos = (pdg_t[:, 2] > 0.5) & batch.is_trigger_target.bool()[is_atar]
+                    B = has_pos.numel()
+                    inter = torch.zeros(B, device=trig.device)
+                    tot = torch.zeros(B, device=trig.device)
+                    inter.index_add_(0, gb, (pred_mask & true_pos).float())
+                    tot.index_add_(0, gb, true_pos.float())
+                    match_frac = inter / tot.clamp(min=1.0)
+                    gate = has_pos & (match_frac > 0.5)
+                    loss_dict['angle_match_rate'] = float(
+                        (gate.float().sum() / has_pos.float().sum().clamp(min=1.0)).item())
+
+            if gate.any():
+                pred_dir = outputs['atar_positron_dir'][gate]
+                tar_dir = targets['tar_angle_vec_per_graph'][gate]
                 l_angle = (1.0 - F.cosine_similarity(pred_dir, tar_dir, dim=1)).mean()
                 loss_dict['loss_positron_angle'] = l_angle
                 total_loss += w_angle * l_angle
+                # Per-epoch walk metric: coherent dz bias on MATCHED events only.
+                loss_dict['angle_dz_bias'] = float(
+                    (pred_dir[:, 2] - tar_dir[:, 2]).mean().item())
 
-                # 4a. Moment decorrelation: penalize θ-dependent bias
+                # 4a. Moment decorrelation: penalize θ-dependent bias.
+                # NOTE: now computed on the MATCH-GATED population — on the ungated
+                # population the wrong-object/default residuals buried the ~1-deg
+                # coherent bias this penalizes (why it never worked when tried before).
                 w_decorr = self.config.get('w_angle_decorr', 0.0)
-                if w_decorr > 0.0 and has_pos.sum() >= 10:
+                if w_decorr > 0.0 and gate.sum() >= 10:
                     eps = 1e-4
                     theta_pred = torch.acos(pred_dir[:, 2].clamp(-1 + eps, 1 - eps))
                     theta_true = torch.acos(tar_dir[:, 2].clamp(-1 + eps, 1 - eps))

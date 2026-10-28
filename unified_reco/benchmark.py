@@ -32,10 +32,28 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from unified_reco.models import PURITYHybridModel
 from unified_reco.models_v2 import PURITYHybridModelV2
 from unified_reco.dataset import PURITYDataset
-from unified_reco.constants import NORM_POS_ATAR, NORM_E_LYSO
+from unified_reco.constants import (NORM_POS_ATAR, NORM_E_LYSO, NORM_E_ATAR,
+                                    NORM_T_ATAR)
+
+# --- Opt-in ATAR hit-level dump ---------------------------------------------------------
+# The model classifies every ATAR hit (trigger / MIP / pion / muon) but only an event-level
+# IoU against truth was ever written out. Setting DUMP_ATAR_HITS writes the per-hit
+# probabilities themselves, which is what a hit-level topology variable needs. Off by
+# default: it is ~50 rows per event, so it multiplies the output size.
+DUMP_ATAR_HITS = False
+ATAR_HITS = {k: [] for k in ('event', 'x', 'y', 'z', 'E', 't_ns', 'is_xz', 'is_yz',
+                             'p_trigger', 'p_mip', 'p_pion', 'p_muon',
+                             # truth per hit (2026-08-01, for the confusion matrix and the
+                             # misclassification displays; absent columns before this date)
+                             't_pion', 't_muon', 't_mip', 't_is_trig')}
 
 BATCH_SIZE = 50
-MAX_HITS = 250
+# dataset.py DELETES events with atar+lyso hits outside (0, MAX_HITS]; it does not
+# truncate them.  250 matches train_purity.py's --max_hits default, so the model has
+# never seen a bigger event.  PURITY_MAX_HITS lifts the cut for the over-250 study
+# (what would the model have done with the events we throw away?); leave it unset for
+# every normal eval so the default stays exactly 250.
+MAX_HITS = int(os.environ.get("PURITY_MAX_HITS", "250"))
 NUM_WORKERS = 2
 SENTINEL = -999.0
 
@@ -99,6 +117,11 @@ def run_inference(model, device, parquet_path, tag='', max_events=None,
                      + df['dead_E'].to_numpy(dtype=np.float32)),
         # --- fields consumed by the R_e/mu analysis (purity_analysis/) ---
         'event_id':  np.arange(n, dtype=np.int64),
+        # atar+lyso hit count -- the quantity dataset.py:224 cuts on.  Recorded so a single
+        # eval run at a loose PURITY_MAX_HITS can be re-analysed at any tighter cap by
+        # filtering truth_n_hits <= cap, instead of re-running the model per cap.
+        'n_hits': (df['atar_x'].map(lambda a: 0 if a is None else len(a)).to_numpy(dtype=np.int32)
+                   + df['lyso_x'].map(lambda a: 0 if a is None else len(a)).to_numpy(dtype=np.int32)),
         'gen_weight': (df['gen_weight'].to_numpy(dtype=np.float64)
                        if 'gen_weight' in df.columns else np.ones(n, dtype=np.float64)),
         'positron_t': (df['truth_positron_t'].to_numpy(dtype=np.float32)
@@ -132,6 +155,29 @@ def run_inference(model, device, parquet_path, tag='', max_events=None,
         'pos_recall':      np.full(n, np.nan, dtype=np.float32),
         'pos_iou':         np.full(n, np.nan, dtype=np.float32),
         'dead_energy':     np.full(n, SENTINEL, dtype=np.float32),
+        # Reconstructed muon ATAR deposit: the ~4.1 MeV a stopped muon leaves and the pi->e
+        # chain does not, which is the in-situ analysis's Michel-suppression handle.  Summed
+        # from the model's own per-hit muon classification, so it uses no truth.
+        'muon_energy':     np.full(n, SENTINEL, dtype=np.float32),
+        # --- systematic-study columns (2026-08-01, all reco-only, see chapter Sec. in-situ) ---
+        # pion Bragg energy: pion-classified ATAR deposit, the chain's start signature.
+        'pion_energy':     np.full(n, SENTINEL, dtype=np.float32),
+        # unassociated MIP track: MIP-classified hits NOT tagged as the trigger positron -- the
+        # failed-match signature (a positron track the event builder did not claim).
+        'mip_orphan_energy': np.full(n, SENTINEL, dtype=np.float32),
+        'mip_orphan_nhits':  np.full(n, SENTINEL, dtype=np.float32),
+        # slice-level multiplicity + top-2 trigger-slice probabilities: the exclusivity
+        # diagnostics (models_v2 computes them; they were never persisted).
+        'n_tagged_pos_slices': np.full(n, SENTINEL, dtype=np.float32),
+        'trig_slice_prob_max': np.full(n, SENTINEL, dtype=np.float32),
+        'trig_slice_prob_2nd': np.full(n, SENTINEL, dtype=np.float32),
+        # leading LYSO cluster, computed INDEPENDENTLY of the positron match: the handle for the
+        # in-situ pie matching-efficiency measurement (select on the cluster, ask if the chain
+        # was reconstructed).
+        'lead_cluster_E':    np.full(n, SENTINEL, dtype=np.float32),
+        'lead_cluster_t_ns': np.full(n, SENTINEL, dtype=np.float32),
+        'lead_cluster_dt_ns': np.full(n, SENTINEL, dtype=np.float32),
+        'n_lyso_clusters':   np.full(n, SENTINEL, dtype=np.float32),
         'positron_time_ns': np.full(n, SENTINEL, dtype=np.float32),
         'positron_time_consensus_ns': np.full(n, SENTINEL, dtype=np.float32),
         'positron_time_consensus_meanconf_ns': np.full(n, SENTINEL, dtype=np.float32),
@@ -165,10 +211,19 @@ def run_inference(model, device, parquet_path, tag='', max_events=None,
     i0 = 0
     t0 = time.time()
     mc_desc = f'infer[{tag}]' if mc_passes <= 1 else f'infer[{tag}] MC×{mc_passes}'
-    # KEEP train() mode during eval — do NOT switch to model.eval(). For this graph net,
-    # eval() swaps in poorly-estimated running normalization (BatchNorm) statistics and
-    # degrades reconstruction; batch statistics (train mode) are the correct choice here.
-    # Dropout noise is averaged out by --mc_passes. (Deliberate; verified with the team.)
+    # KEEP train() mode during eval -- do NOT switch to model.eval().
+    # NOT for the reason this comment used to give. There is no BatchNorm in this model: all 26
+    # normalization layers are nn.LayerNorm, the model holds zero buffers, and LayerNorm ignores
+    # self.training, so there are no running statistics to be "poorly estimated" and no batch
+    # dependence of any kind (verified: batch size 200 vs 43 vs 1 gives bitwise identical discrete
+    # outputs on the same events).
+    # The real reason is the attention fastpath. eval() lets PyTorch select the fused MHA kernel,
+    # which accepts only a BOOLEAN padding mask and SILENTLY DISCARDS the float one -- and the float
+    # mask is how the event builder's endpoint-compatibility (chi2 / best_xy) bias is injected, so
+    # in eval() that physics gate vanishes and trigger-slice logits shift by ~370.
+    # models_v2.py now disables the fastpath at import, so both modes take the same path; train()
+    # is retained only as a second guard. Dropout is 0.0 for the production checkpoint, so train()
+    # and eval() are bitwise identical there and --mc_passes averaging is not needed.
     model.train()
     with torch.inference_mode():
         for batch in tqdm(dl, desc=mc_desc):
@@ -247,22 +302,111 @@ def run_inference(model, device, parquet_path, tag='', max_events=None,
                             union = n_p + n_t - n_m
                             if union > 0: preds['pos_iou'][i0 + k] = n_m / union
 
+                    # --- reconstructed muon ATAR energy (no truth) ---
+                    hit_muon = out.get('atar_hit_muon_prob')
+                    if hit_muon is not None:
+                        is_atar_m = (batch.x[:, 5] > 0.5) | (batch.x[:, 6] > 0.5)
+                        if is_atar_m.any():
+                            e_m = (batch.x[is_atar_m, 3] * NORM_E_ATAR).detach()
+                            pm = hit_muon[is_atar_m].detach() if hit_muon.shape[0] == batch.x.shape[0] \
+                                 else hit_muon.detach()
+                            bm = batch.batch[is_atar_m].detach()
+                            sel_m = (pm > 0.5).float()
+                            acc_m = torch.zeros(B, device=e_m.device)
+                            acc_m.index_add_(0, bm, e_m * sel_m)
+                            preds['muon_energy'][sl] = acc_m.cpu().numpy()
+
+                    # --- pion Bragg energy + orphan MIP track (no truth) ---
+                    hit_pion = out.get('atar_hit_pion_prob')
+                    if hit_pion is not None:
+                        is_atar_p = (batch.x[:, 5] > 0.5) | (batch.x[:, 6] > 0.5)
+                        if is_atar_p.any():
+                            e_p = (batch.x[is_atar_p, 3] * NORM_E_ATAR).detach()
+                            bp = batch.batch[is_atar_p].detach()
+                            pp_ = hit_pion[is_atar_p].detach() if hit_pion.shape[0] == batch.x.shape[0]                                   else hit_pion.detach()
+                            acc_p = torch.zeros(B, device=e_p.device)
+                            acc_p.index_add_(0, bp, e_p * (pp_ > 0.5).float())
+                            preds['pion_energy'][sl] = acc_p.cpu().numpy()
+                    if hit_trig is not None and hit_mip is not None:
+                        is_atar_o = (batch.x[:, 5] > 0.5) | (batch.x[:, 6] > 0.5)
+                        if is_atar_o.any():
+                            e_o = (batch.x[is_atar_o, 3] * NORM_E_ATAR).detach()
+                            bo = batch.batch[is_atar_o].detach()
+                            ht = hit_trig[is_atar_o].detach() if hit_trig.shape[0] == batch.x.shape[0] else hit_trig.detach()
+                            hm2 = hit_mip[is_atar_o].detach() if hit_mip.shape[0] == batch.x.shape[0] else hit_mip.detach()
+                            orphan = ((hm2 > 0.5) & (ht <= 0.5)).float()
+                            acc_e = torch.zeros(B, device=e_o.device); acc_n = torch.zeros(B, device=e_o.device)
+                            acc_e.index_add_(0, bo, e_o * orphan); acc_n.index_add_(0, bo, orphan)
+                            preds['mip_orphan_energy'][sl] = acc_e.cpu().numpy()
+                            preds['mip_orphan_nhits'][sl] = acc_n.cpu().numpy()
+                    # --- slice multiplicity + top-2 trigger-slice probabilities (no truth) ---
+                    ntag = out.get('n_tagged_pos_slices')
+                    if ntag is not None and ntag.numel() >= B:
+                        preds['n_tagged_pos_slices'][sl] = ntag.view(-1)[:B].float().cpu().numpy()
+                    tlog = out.get('atar_trigger_logits'); sev = out.get('atar_slice_event_idx')
+                    if tlog is not None and sev is not None and tlog.numel() == sev.numel() and tlog.numel() > 0:
+                        tp2 = torch.sigmoid(tlog.detach().view(-1)).cpu().numpy()
+                        se2 = sev.detach().view(-1).cpu().numpy().astype(int)
+                        for k in range(B):
+                            pk = tp2[se2 == k]
+                            if pk.size >= 1:
+                                srt = np.sort(pk)[::-1]
+                                preds['trig_slice_prob_max'][i0 + k] = srt[0]
+                                preds['trig_slice_prob_2nd'][i0 + k] = srt[1] if pk.size >= 2 else 0.0
+
+                    # --- ATAR hit-level dump (opt-in, no truth used) ---
+                    if DUMP_ATAR_HITS and hit_trig is not None and hit_mip is not None:
+                        is_atar_d = (batch.x[:, 5] > 0.5) | (batch.x[:, 6] > 0.5)
+                        if is_atar_d.any():
+                            xa = batch.x[is_atar_d].detach().cpu().numpy()
+                            ba = batch.batch[is_atar_d].detach().cpu().numpy()
+                            nh = xa.shape[0]
+
+                            def _hp(name, fallback=None):
+                                v = out.get(name) if fallback is None else fallback
+                                if v is None:
+                                    return np.full(nh, np.nan, dtype=np.float32)
+                                return v.detach().cpu().numpy().reshape(-1)[:nh]
+
+                            ATAR_HITS['event'].append((i0 + ba).astype(np.int64))
+                            ATAR_HITS['x'].append(xa[:, 0] * NORM_POS_ATAR)
+                            ATAR_HITS['y'].append(xa[:, 1] * NORM_POS_ATAR)
+                            ATAR_HITS['z'].append(xa[:, 2] * NORM_POS_ATAR)
+                            ATAR_HITS['E'].append(xa[:, 3] * NORM_E_ATAR)
+                            ATAR_HITS['t_ns'].append(xa[:, 4] * NORM_T_ATAR)
+                            ATAR_HITS['is_xz'].append(xa[:, 5])
+                            ATAR_HITS['is_yz'].append(xa[:, 6])
+                            if hasattr(batch, 'atar_node_pdg_target'):
+                                pdg_t = batch.atar_node_pdg_target.detach().cpu().numpy()
+                                ATAR_HITS['t_pion'].append(pdg_t[:nh, 0])
+                                ATAR_HITS['t_muon'].append(pdg_t[:nh, 1])
+                                ATAR_HITS['t_mip'].append(pdg_t[:nh, 2])
+                            else:
+                                for _k in ('t_pion', 't_muon', 't_mip'):
+                                    ATAR_HITS[_k].append(np.full(nh, np.nan, dtype=np.float32))
+                            if hasattr(batch, 'is_trigger_target'):
+                                itt = batch.is_trigger_target.detach().cpu().float().numpy()
+                                ATAR_HITS['t_is_trig'].append(itt[is_atar_d.cpu().numpy() > 0][:nh]
+                                                              if itt.shape[0] == batch.x.shape[0] else itt[:nh])
+                            else:
+                                ATAR_HITS['t_is_trig'].append(np.full(nh, np.nan, dtype=np.float32))
+                            ATAR_HITS['p_trigger'].append(_hp(None, hit_trig))
+                            ATAR_HITS['p_mip'].append(_hp(None, hit_mip))
+                            ATAR_HITS['p_pion'].append(_hp('atar_hit_pion_prob'))
+                            ATAR_HITS['p_muon'].append(_hp('atar_hit_muon_prob'))
+
                     # --- Per-event timing capture ---
                     pos_time_out = out.get('positron_time_per_graph')
                     if pos_time_out is not None:
-                        from unified_reco.constants import NORM_T_ATAR
                         preds['positron_time_ns'][sl] = pos_time_out.cpu().numpy()[:B] * NORM_T_ATAR
                     pos_cons_out = out.get('positron_time_consensus')
                     if pos_cons_out is not None:
-                        from unified_reco.constants import NORM_T_ATAR
                         preds['positron_time_consensus_ns'][sl] = pos_cons_out.cpu().numpy()[:B] * NORM_T_ATAR
                     pos_mc_out = out.get('positron_time_consensus_meanconf')
                     if pos_mc_out is not None:
-                        from unified_reco.constants import NORM_T_ATAR
                         preds['positron_time_consensus_meanconf_ns'][sl] = pos_mc_out.cpu().numpy()[:B] * NORM_T_ATAR
                     pos_ar_out = out.get('positron_time_argmax_role')
                     if pos_ar_out is not None:
-                        from unified_reco.constants import NORM_T_ATAR
                         preds['positron_time_argmax_role_ns'][sl] = pos_ar_out.cpu().numpy()[:B] * NORM_T_ATAR
                     hit_trig_ts = out.get('atar_hit_trigger_prob')
                     hit_mip_ts = out.get('atar_hit_mip_prob')
@@ -367,8 +511,18 @@ def run_inference(model, device, parquet_path, tag='', max_events=None,
                     dt_np = dt_out.cpu().numpy().reshape(n_valid, K) if dt_out is not None else np.full((n_valid, K), np.nan)
                     ct_np = ct_out.cpu().numpy().reshape(n_valid, K) if ct_out is not None else np.full((n_valid, K), np.nan)
                     valid_event_ids = np.where(has_lyso_g)[0]
+                    ke_out = out.get('lyso_cluster_energies')     # [Total_K], units of NORM_E_LYSO
+                    ke_np = (ke_out.cpu().numpy().reshape(n_valid, K) * NORM_E_LYSO
+                             if ke_out is not None and ke_out.numel() == n_valid * K else None)
                     for vi in range(n_valid):
                         ev_global = i0 + int(valid_event_ids[vi])
+                        if ke_np is not None:
+                            ei = ke_np[vi]
+                            li = int(np.argmax(ei))
+                            preds['lead_cluster_E'][ev_global] = ei[li]
+                            preds['lead_cluster_t_ns'][ev_global] = ct_np[vi, li]
+                            preds['lead_cluster_dt_ns'][ev_global] = dt_np[vi, li]
+                            preds['n_lyso_clusters'][ev_global] = float((ei > 0.5).sum())
                         for ki in range(K):
                             lyso_cluster_event.append(ev_global)
                             lyso_cluster_coinc.append(float(coinc_np[vi, ki]))
@@ -457,6 +611,7 @@ def save_event_parquet(truth, preds, output_path):
         'truth_htp': truth['htp'],
         # --- fields for purity_analysis (R_e/mu) ---
         'event_id': truth['event_id'],
+        'n_hits': truth['n_hits'],
         'truth_gen_weight': truth['gen_weight'],
         'truth_positron_t': truth['positron_t'],
         'truth_is_pie': truth['is_pie'],
@@ -477,6 +632,17 @@ def save_event_parquet(truth, preds, output_path):
         'pred_positron_energy': preds['positron_energy'],
         'pred_htp': preds['htp'],
         'pred_dead_energy': preds['dead_energy'],
+        'pred_muon_energy': preds['muon_energy'],
+        'pred_pion_energy': preds['pion_energy'],
+        'pred_mip_orphan_energy': preds['mip_orphan_energy'],
+        'pred_mip_orphan_nhits': preds['mip_orphan_nhits'],
+        'pred_n_tagged_pos_slices': preds['n_tagged_pos_slices'],
+        'pred_trig_slice_prob_max': preds['trig_slice_prob_max'],
+        'pred_trig_slice_prob_2nd': preds['trig_slice_prob_2nd'],
+        'pred_lead_cluster_E': preds['lead_cluster_E'],
+        'pred_lead_cluster_t_ns': preds['lead_cluster_t_ns'],
+        'pred_lead_cluster_dt_ns': preds['lead_cluster_dt_ns'],
+        'pred_n_lyso_clusters': preds['n_lyso_clusters'],
         'pred_pos_precision': preds['pos_precision'],
         'pred_pos_recall': preds['pos_recall'],
         'pred_pos_iou': preds['pos_iou'],
@@ -561,6 +727,27 @@ def save_lyso_parquet(lyso_data, output_path):
     print(f"  wrote {output_path} ({len(df)} LYSO hits)")
 
 
+def save_atar_hit_parquet(output_path):
+    """Write the accumulated ATAR hit dump and clear it for the next eval file.
+
+    Positions are in mm as the model receives them, so one transverse coordinate is zero per
+    hit: is_xz hits carry x, is_yz hits carry y, and both carry z. Anything built from this
+    table therefore sees exactly what the network sees, which is the point of dumping it.
+    """
+    n = sum(len(a) for a in ATAR_HITS['event'])
+    if n == 0:
+        print(f"  [atar_hits] nothing to write for {output_path}")
+        return
+    data = {k: np.concatenate(v) for k, v in ATAR_HITS.items()}
+    data['event_id'] = data.pop('event').astype(np.int64)
+    df = pd.DataFrame({k: (v.astype(np.int64) if k == 'event_id' else v.astype(np.float32))
+                       for k, v in data.items()})
+    df.to_parquet(output_path, index=False)
+    print(f"  [atar_hits] {len(df):,} hits -> {output_path}")
+    for v in ATAR_HITS.values():
+        v.clear()
+
+
 def save_lyso_cluster_parquet(cluster_data, output_path):
     """Save per-LYSO-cluster timing data to a parquet."""
     n = len(cluster_data['event'])
@@ -603,10 +790,15 @@ def main():
                         help="MC dropout passes for averaging p_hit (default 1 = no averaging)")
     parser.add_argument("--truth_positron_mask", action="store_true",
                         help="Use truth-level hit labels for positron direction head input.")
+    parser.add_argument("--dump_atar_hits", action="store_true",
+                        help="Also write {tag}_atar_hits.parquet: per-ATAR-hit position, "
+                             "energy, time and the model's trigger/MIP/pion/muon "
+                             "probabilities. Large (~50 rows per event).")
     args = parser.parse_args()
 
-    global BATCH_SIZE
+    global BATCH_SIZE, DUMP_ATAR_HITS
     BATCH_SIZE = args.batch_size
+    DUMP_ATAR_HITS = args.dump_atar_hits
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"device: {device}", flush=True)
@@ -686,6 +878,11 @@ def main():
             't_ns': l_hit_t,
             'K': l_K or 4,
         }, os.path.join(args.output_dir, f"{tag}_lyso_hits.parquet"))
+
+        # Save ATAR hit-level classification (opt-in)
+        if args.dump_atar_hits:
+            save_atar_hit_parquet(
+                os.path.join(args.output_dir, f"{tag}_atar_hits.parquet"))
 
         # Save LYSO cluster-level timing
         save_lyso_cluster_parquet({

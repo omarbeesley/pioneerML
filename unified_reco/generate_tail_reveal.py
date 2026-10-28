@@ -254,6 +254,10 @@ def main():
     parser.add_argument("--keep_rmd", action="store_true",
                         help="KEEP radiative muon decays (kMurad) in the michel pool. Default: "
                              "purged at mixer load (triggers, pileup donors, calo-only stream).")
+    parser.add_argument("--pileup_lam", type=float, default=0.24,
+                        help="Poisson mean of ATAR pileup tracks per event. 0.0 = NO-PILEUP "
+                             "(dedicated low-rate pion-run emulation, e.g. for the htp-failure "
+                             "orphan-track correction closure test). Default 0.24 = nominal rate.")
     parser.add_argument("--calo_michel_rate", type=float, default=0.0,
                         help="Poisson rate/event of time-independent CALO-ONLY michel pileup "
                              "(old-muon decays whose positron missed the ATAR). 0 disables "
@@ -271,6 +275,7 @@ def main():
     for _s in specs.values():
         _s["opts"]["no_replace"] = args.no_replace
         _s["opts"]["calo_michel_rate"] = args.calo_michel_rate
+        _s["opts"]["pileup_lam"] = args.pileup_lam
     selected = [args.only] if args.only else list(specs.keys())
     files_by_split = split_files(args.data_dir)
 

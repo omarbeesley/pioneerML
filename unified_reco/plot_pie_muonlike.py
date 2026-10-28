@@ -164,7 +164,7 @@ def main():
     os.makedirs(args.out_dir, exist_ok=True)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = PURITYTailModel(dropout=0.0).to(device).eval()
+    model = PURITYTailModel(dropout=0.05).to(device).train()
     ck = torch.load(args.checkpoint, map_location=device)
     sd = ck["model"] if isinstance(ck, dict) and "model" in ck else ck
     model.load_state_dict(sd, strict=False)

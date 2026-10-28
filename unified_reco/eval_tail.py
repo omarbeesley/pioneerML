@@ -624,12 +624,23 @@ def main():
                    help="One or more eval parquets; is_pie_target is the label.")
     p.add_argument("--output_dir", default="tail_reveal_eval")
     p.add_argument("--dropout", type=float, default=0.0)
+    p.add_argument("--train_mode", action="store_true",
+                   help="Keep the network in train() mode at inference, matching the convention used "
+                        "for the main PURITY model. Combine with --dropout 0.05 (the value the tail "
+                        "model was trained with) to evaluate in the configuration it was trained in. "
+                        "The default eval() path runs with dropout disabled.")
     p.add_argument("--batch_size", type=int, default=128)
     p.add_argument("--max_hits", type=int, default=250)
     p.add_argument("--max_events", type=int, default=None)
     p.add_argument("--shard_size", type=int, default=0,
                    help="If >0, stream each parquet in row-chunks of this many events "
                         "(bounds RAM, full coverage). 0 = load the whole file into RAM.")
+    p.add_argument("--infer_only", action="store_true",
+                   help="Write predictions.parquet then STOP (parallel-then-merge; skips analysis/figures).")
+    p.add_argument("--n_chunks", type=int, default=1,
+                   help="Split each --data file into N contiguous row-chunks for data-parallel inference.")
+    p.add_argument("--chunk_idx", type=int, default=0,
+                   help="Which chunk [0,n_chunks) this task processes (used with --n_chunks).")
     p.add_argument("--n_bins", type=int, default=12)
     p.add_argument("--leak_sig_eff", type=float, default=0.90,
                    help="Per-head signal efficiency used to set the leak-through "
@@ -665,6 +676,14 @@ def main():
         print("[warn] no --checkpoint: evaluating a RANDOM model (plumbing test only)",
               flush=True)
 
+    if args.train_mode:
+        model.train()
+        n_do = sum(1 for m in model.modules() if isinstance(m, torch.nn.Dropout))
+        print(f"[mode] train() at inference: {n_do} dropout modules ACTIVE at p={args.dropout}. "
+              f"Predictions carry a stochastic component; average passes if that matters.", flush=True)
+    else:
+        print(f"[mode] eval(): dropout disabled (constructed at p={args.dropout})", flush=True)
+
     arrs = []
     for path in args.data:
         if args.shard_size and args.shard_size > 0:
@@ -680,9 +699,32 @@ def main():
                                     shuffle=False, num_workers=0)
                 arrs.append(collect(model, loader, device, progress=False))
                 del ds, loader
+        elif args.n_chunks > 1:
+            # Data-parallel: materialize only this task's contiguous row-slice [lo,hi) (memory-safe streaming).
+            import pandas as pd
+            pf = pq.ParquetFile(path); nrows = pf.metadata.num_rows
+            cs = math.ceil(nrows / args.n_chunks)
+            lo, hi = args.chunk_idx * cs, min((args.chunk_idx + 1) * cs, nrows)
+            if lo >= nrows:
+                continue
+            frames, seen = [], 0
+            for rb in pf.iter_batches(batch_size=16384):
+                n = rb.num_rows
+                if seen + n <= lo:
+                    seen += n; continue
+                if seen >= hi:
+                    break
+                a = max(0, lo - seen); b = min(n, hi - seen)
+                frames.append(rb.slice(a, b - a).to_pandas()); seen += n
+            if not frames:
+                continue
+            print(f"chunk {args.chunk_idx}/{args.n_chunks} of {path}: rows [{lo},{hi})", flush=True)
+            ds = PURITYDataset(dataframe=pd.concat(frames, ignore_index=True), max_hits=args.max_hits)
+            loader = DataLoader(ds, batch_size=args.batch_size, shuffle=False, num_workers=0)
+            arrs.append(collect(model, loader, device, progress=True))
         else:
             ds = PURITYDataset(path, max_hits=args.max_hits, max_events=args.max_events)
-            loader = DataLoader(ds, batch_size=args.batch_size, shuffle=False, num_workers=2)
+            loader = DataLoader(ds, batch_size=args.batch_size, shuffle=False, num_workers=0)
             arrs.append(collect(model, loader, device, progress=True))
     arrs = [a for a in arrs if len(a["is_pie"]) > 0]      # drop empty shards
     if not arrs:
@@ -698,6 +740,11 @@ def main():
 
     # cache per-event outputs so cuts/plots can be redone offline (no re-inference)
     write_predictions(data, f"{args.output_dir}/predictions.parquet")
+
+    if args.infer_only:
+        print(f"[infer_only] wrote {len(is_pie)} predictions -> {args.output_dir}/predictions.parquet; "
+              f"skipping analysis/figures.", flush=True)
+        return
 
     # ---- ROC: holistic vs topology head ----
     fig, ax = plt.subplots(figsize=(5, 5))

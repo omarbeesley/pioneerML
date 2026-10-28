@@ -148,7 +148,7 @@ def main():
     args = p.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = PURITYTailModel(dropout=0.0).to(device).eval()
+    model = PURITYTailModel(dropout=0.05).to(device).train()
     ck = torch.load(args.checkpoint, map_location=device)
     sd = ck["model"] if isinstance(ck, dict) and "model" in ck else ck
     miss, unexp = model.load_state_dict(sd, strict=False)

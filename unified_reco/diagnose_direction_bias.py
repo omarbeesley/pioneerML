@@ -125,7 +125,7 @@ def run_hooked_inference(model, device, parquet_path, max_events=None):
     all_hit_positions = []       # mean hit z per graph (for reference)
 
     i0 = 0
-    model.eval()
+    model.train()
     with torch.inference_mode():
         for batch in tqdm(dl, desc='hooked inference'):
             batch = batch.to(device, non_blocking=True)

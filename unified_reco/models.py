@@ -291,8 +291,8 @@ class PURITYHybridModel(nn.Module):
         # is injected at the final layer so it isn't swamped by the high-dim pooled vector.
         _pdg_hidden = hidden_dim
         self.atar_slice_pdg_body = nn.Sequential(
-            nn.Linear(jk_dim, _pdg_hidden), nn.GELU(), nn.Dropout(0.1),
-            nn.Linear(_pdg_hidden, _pdg_hidden // 2), nn.GELU(), nn.Dropout(0.1),
+            nn.Linear(jk_dim, _pdg_hidden), nn.GELU(), nn.Dropout(dropout),
+            nn.Linear(_pdg_hidden, _pdg_hidden // 2), nn.GELU(), nn.Dropout(dropout),
         )
         self.atar_slice_pdg_norm = nn.LayerNorm(_pdg_hidden // 2 + 1)
         self.atar_slice_pdg_final = nn.Linear(_pdg_hidden // 2 + 1, num_pdg_classes)
@@ -326,8 +326,8 @@ class PURITYHybridModel(nn.Module):
         # 3. Splitter (Node PDG) - Input: Node JK
         # Body compresses per-hit jk representation; total slice energy injected at final layer.
         self.atar_pdg_body = nn.Sequential(
-            nn.Linear(jk_dim, _pdg_hidden), nn.GELU(), nn.Dropout(0.1),
-            nn.Linear(_pdg_hidden, _pdg_hidden // 2), nn.GELU(), nn.Dropout(0.1),
+            nn.Linear(jk_dim, _pdg_hidden), nn.GELU(), nn.Dropout(dropout),
+            nn.Linear(_pdg_hidden, _pdg_hidden // 2), nn.GELU(), nn.Dropout(dropout),
         )
         self.atar_pdg_norm = nn.LayerNorm(_pdg_hidden // 2 + 1)
         self.atar_pdg_final = nn.Linear(_pdg_hidden // 2 + 1, 3)
@@ -416,7 +416,7 @@ class PURITYHybridModel(nn.Module):
         # Slim transformer: D=32, 2 heads, 2 layers
         slim_layer = nn.TransformerEncoderLayer(
             d_model=D_EVENT, nhead=2, dim_feedforward=D_EVENT * 4,
-            batch_first=True, dropout=0.1
+            batch_first=True, dropout=dropout
         )
         self.slim_event_transformer = nn.TransformerEncoder(slim_layer, num_layers=2)
 
@@ -473,8 +473,8 @@ class PURITYHybridModel(nn.Module):
         JK_DIM = (self.L_TRIG + 1) * D_A
         ROLE_IN = 3 * JK_DIM + 6
         self.atar_role_head = nn.Sequential(
-            nn.Linear(ROLE_IN, D_A), nn.GELU(), nn.Dropout(0.1),
-            nn.Linear(D_A, D_A // 2), nn.GELU(), nn.Dropout(0.1),
+            nn.Linear(ROLE_IN, D_A), nn.GELU(), nn.Dropout(dropout),
+            nn.Linear(D_A, D_A // 2), nn.GELU(), nn.Dropout(dropout),
             nn.Linear(D_A // 2, 3),
         )
 

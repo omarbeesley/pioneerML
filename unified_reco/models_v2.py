@@ -21,6 +21,43 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
+import os
+
+# Endpoint-compatibility attention-gate mode (env PURITY_GATE_MODE):
+#   "3d"      (default) — sum the endpoint chi2 over x,y,z (original behavior)
+#   "best_xy"           — z + BEST_XY_BETA * (better-matching of x,y). Transverse tracks are tight in z
+#                         and one of x/y but garbage in the other view (ran along a strip length / gaps);
+#                         the endpoint analysis showed htp failures are driven purely by that worse view
+#                         (worse-xy 1.9mm on fails vs 0.7mm on matches, while z & better-xy are identical).
+#                         best_xy uses only z + the good view, so it stops the bad view wrongly BLOCKING
+#                         the transverse positron's attention. Default off so existing runs are unchanged.
+_GATE_MODE = os.environ.get("PURITY_GATE_MODE", "3d")
+BEST_XY_BETA = float(os.environ.get("PURITY_BEST_XY_BETA", "0.5"))  # z-majority: xy contributes < z
+
+# Role-head Δz-FiLM mode (env PURITY_ROLE_FILM=1, default OFF — changes ROLE_IN so old
+# checkpoints cannot load; activate only for from-scratch retrains):
+#   The raw 6-dim endpoint deltas are REMOVED from the role-head concat input (their
+#   unbounded x-y components are what mis-classify gap-riding michels: muons riding the
+#   inter-plane AIR GAPS move mm's in x-y at ~constant z, and events with |Δ3D|>2mm fail
+#   identification at 51× the baseline while their Δz is perfectly normal). Instead the
+#   physically BOUNDED Δz — a true chain positron starts within ~1.05 mm in z of the pion
+#   stop, max over 201k truth michels, because a 4.1 MeV muon can only move in z through
+#   silicon — CONDITIONS the head via FiLM: gamma/beta over all 512 hidden channels.
+#   As 2 of 2310 concat dims Δz could be (and evidently was) ignored; as a multiplicative
+#   modulator it cannot.
+_ROLE_FILM = os.environ.get("PURITY_ROLE_FILM", "0") == "1"
+Z_CHAIN_BOUND_MM = 1.05   # measured |Δz| bound for true chain positrons (zbound_test.py)
+
+# Positron-energy TIME GATE (env PURITY_ENERGY_TIME_GATE_NS, default 0 = OFF/unchanged).
+# The htp rule accepts ANY slice with >=2 qualifying hits, so a pileup positron hundreds of ns
+# away can also be tagged; the consensus TIME then picks the dominant slice (correct) while the
+# energy sum runs over EVERY tagged hit -- adding the pileup positron's ATAR pixels and, far
+# more importantly, its calorimeter cluster.  Measured on the early-time high-bin michel "wall":
+# e.g. a 27 MeV michel + a 37 MeV cluster at t+342 ns reconstructing as 68 MeV, i.e. above the
+# 56 MeV split.  Setting this to e.g. 5.0 restricts the energy sum to hits whose (ATAR slice /
+# LYSO hit) time lies within N ns of the consensus positron time -- the same single-slice
+# convention the time estimator already uses.
+_E_TIME_GATE_NS = float(os.environ.get("PURITY_ENERGY_TIME_GATE_NS", "0") or 0.0)
 
 from torch_geometric.utils import to_dense_batch
 from torch_geometric.nn import global_max_pool, global_add_pool, AttentionalAggregation
@@ -32,10 +69,18 @@ from models import (
     build_lyso_edge_attr,
 )
 from constants import (
-    NORM_T_LYSO, NORM_E_LYSO, NORM_E_ATAR, NORM_POS_ATAR,
+    NORM_T_LYSO, NORM_T_ATAR, NORM_E_LYSO, NORM_E_ATAR, NORM_POS_ATAR,
     SIGMA_COINC_NS, TOF_NS,
     ACCEPT_Z_MIN_MM, ACCEPT_Z_MAX_MM, ACCEPT_XY_MAX_MM, ACCEPT_ANGLE_MAX_DEG,
 )
+
+# The nn.TransformerEncoder(-Layer) eval()-mode fastpath SILENTLY DROPS float src_mask
+# attention biases — i.e. the endpoint-compatibility chi2 gate (incl. best_xy) vanishes
+# in eval(). Disable the fastpath globally so eval() takes the same python path as
+# train() and the gate is ALWAYS applied. (This is why inference was historically pinned
+# to train(); with dropout=0 models, train() and eval() are now identical either way.)
+if hasattr(torch.backends, "mha") and hasattr(torch.backends.mha, "set_fastpath_enabled"):
+    torch.backends.mha.set_fastpath_enabled(False)
 
 _ACCEPT_ANGLE_COS = math.cos(math.radians(ACCEPT_ANGLE_MAX_DEG))
 
@@ -148,13 +193,33 @@ class PURITYHybridModelV2(PURITYHybridModel):
         # The extra 512D layer gives the head more room to process the
         # self/anchor/delta token combination.
         JK_DIM_ROLE = (self.L_TRIG + 1) * D_A
-        ROLE_IN = 3 * JK_DIM_ROLE + 6
-        self.atar_role_head = nn.Sequential(
-            nn.Linear(ROLE_IN, 512), nn.GELU(), nn.Dropout(dropout),
-            nn.Linear(512, D_A), nn.GELU(), nn.Dropout(dropout),
-            nn.Linear(D_A, D_A // 2), nn.GELU(), nn.Dropout(dropout),
-            nn.Linear(D_A // 2, 3),
-        )
+        if _ROLE_FILM:
+            # Δz-FiLM role head (see module docstring at _ROLE_FILM): endpoint deltas
+            # removed from the concat; bounded Δz conditions the 512-dim hidden layer.
+            ROLE_IN = 3 * JK_DIM_ROLE
+            self.atar_role_fc1 = nn.Linear(ROLE_IN, 512)
+            self.atar_role_film = nn.Sequential(
+                nn.Linear(4, 64), nn.GELU(),
+                nn.Linear(64, 1024),          # -> gamma(512), beta(512)
+            )
+            # Identity modulation at init (gamma=1, beta=0): training starts exactly as
+            # if FiLM were absent; zero input (invalid anchor) also gives identity.
+            nn.init.zeros_(self.atar_role_film[-1].weight)
+            nn.init.zeros_(self.atar_role_film[-1].bias)
+            self.atar_role_rest = nn.Sequential(
+                nn.Dropout(dropout),
+                nn.Linear(512, D_A), nn.GELU(), nn.Dropout(dropout),
+                nn.Linear(D_A, D_A // 2), nn.GELU(), nn.Dropout(dropout),
+                nn.Linear(D_A // 2, 3),
+            )
+        else:
+            ROLE_IN = 3 * JK_DIM_ROLE + 6
+            self.atar_role_head = nn.Sequential(
+                nn.Linear(ROLE_IN, 512), nn.GELU(), nn.Dropout(dropout),
+                nn.Linear(512, D_A), nn.GELU(), nn.Dropout(dropout),
+                nn.Linear(D_A, D_A // 2), nn.GELU(), nn.Dropout(dropout),
+                nn.Linear(D_A // 2, 3),
+            )
 
     # --------------------------------------------------------------------- #
     #  forward() — full override for reverse cross-attention + nhead fix     #
@@ -534,7 +599,11 @@ class PURITYHybridModelV2(PURITYHybridModel):
 
                 alpha = F.softplus(self.kernel_alpha).view(1, 1, 1, 1, 1, 3)
                 neg_chi2 = -(delta_sq / var_sum) * alpha
-                g_per_pair = neg_chi2.sum(dim=-1)
+                if _GATE_MODE == "best_xy":
+                    # z + majority-weighted BETTER of the two transverse views (ignore the bad one)
+                    g_per_pair = neg_chi2[..., 2] + BEST_XY_BETA * torch.maximum(neg_chi2[..., 0], neg_chi2[..., 1])
+                else:
+                    g_per_pair = neg_chi2.sum(dim=-1)
                 kernel_bias = torch.logsumexp(g_per_pair.flatten(-2, -1), dim=-1)
                 kernel_bias = kernel_bias.clamp(min=-50.0)
 
@@ -606,13 +675,30 @@ class PURITYHybridModelV2(PURITYHybridModel):
                 endpoint_anchor_per_event = endpoint_anchor_per_event * anchor_valid.float().unsqueeze(-1)
                 endpoint_delta = endpoint_mean_flat - endpoint_anchor_per_event[slice_event_idx]
 
-                role_input = torch.cat([
-                    jk_flat,
-                    anchor_token_per_slice,
-                    jk_flat - anchor_token_per_slice,
-                    endpoint_delta,
-                ], dim=-1)
-                role_logits = self.atar_role_head(role_input)
+                if _ROLE_FILM:
+                    # Δz-FiLM path: unbounded x-y deltas stay OUT of the decision input;
+                    # the chain-bounded Δz (entry-z, stop-z vs the pion anchor = indices
+                    # 2 and 5 of endpoint_delta) modulates the hidden layer instead.
+                    role_input = torch.cat([
+                        jk_flat,
+                        anchor_token_per_slice,
+                        jk_flat - anchor_token_per_slice,
+                    ], dim=-1)
+                    dz = endpoint_delta[:, [2, 5]]                    # signed, normalized units
+                    z_bound = Z_CHAIN_BOUND_MM / NORM_POS_ATAR
+                    dz_feats = torch.cat([dz, dz.abs() / z_bound], dim=-1)
+                    h_role = F.gelu(self.atar_role_fc1(role_input))
+                    gamma, beta = self.atar_role_film(dz_feats).chunk(2, dim=-1)
+                    h_role = h_role * (1.0 + gamma) + beta
+                    role_logits = self.atar_role_rest(h_role)
+                else:
+                    role_input = torch.cat([
+                        jk_flat,
+                        anchor_token_per_slice,
+                        jk_flat - anchor_token_per_slice,
+                        endpoint_delta,
+                    ], dim=-1)
+                    role_logits = self.atar_role_head(role_input)
 
                 in_chain_logits = torch.logsumexp(role_logits[:, 1:], dim=-1) - role_logits[:, 0]
 
@@ -1375,6 +1461,18 @@ class PURITYHybridModelV2(PURITYHybridModel):
         pos_energy = torch.zeros(B, device=device)
         has_any = False
 
+        # reference time for the optional energy time gate: the consensus (dominant-slice)
+        # positron time -- the same quantity the reported positron time uses.
+        _t_ref = None
+        if _E_TIME_GATE_NS > 0:
+            _t_ref = output.get('positron_time_consensus')
+            if _t_ref is not None and _t_ref.size(0) >= B:
+                # stored NORMALISED (benchmark.py multiplies by NORM_T_ATAR for the _ns column);
+                # the ATAR slice time (col 9) and LYSO times below are in ns, so convert here.
+                _t_ref = _t_ref[:B] * NORM_T_ATAR
+            else:
+                _t_ref = None
+
         trig_p = output.get('atar_hit_trigger_prob')
         mip_p = output.get('atar_hit_mip_prob')
         pion_p = output.get('atar_hit_pion_prob')
@@ -1388,6 +1486,10 @@ class PURITYHybridModelV2(PURITYHybridModel):
                 pos_mask = pos_mask * ((pion_p < 0.05) & (muon_p < 0.05)).float()
             batch_atar = batch[is_atar]
             e_atar = x[is_atar, 3] * NORM_E_ATAR
+            if _t_ref is not None and x.size(1) > 9:
+                # ATAR hit times are carried per SLICE (col 9 = slice_mean_t, ns); col 4 is 0
+                dt_a = (x[is_atar, 9] - _t_ref[batch_atar]).abs()
+                pos_mask = pos_mask * (dt_a < _E_TIME_GATE_NS).float()
             pos_energy.index_add_(0, batch_atar, e_atar * pos_mask)
             has_any = True
 
@@ -1415,6 +1517,9 @@ class PURITYHybridModelV2(PURITYHybridModel):
             output['lyso_hit_trigger_prob'] = p_hit.detach()
             lyso_mask = (p_hit > 0.5).float()
             e_lyso = x[is_lyso, 3] * NORM_E_LYSO
+            if _t_ref is not None:
+                dt_l = (x[is_lyso, 4] * NORM_T_LYSO - _t_ref[hit_graph]).abs()
+                lyso_mask = lyso_mask * (dt_l < _E_TIME_GATE_NS).float()
             pos_energy.index_add_(0, hit_graph, e_lyso * lyso_mask)
             has_any = True
 

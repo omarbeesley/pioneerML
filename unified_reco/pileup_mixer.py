@@ -50,20 +50,59 @@ MUON      = 0b000010
 POSITRON  = 0b000100
 kMudif    = 0x0000001000   # PIEventType muon-decay-in-flight bit (in the event_type column)
 kPidif    = 0x0000000010   # PIEventType pion-decay-in-flight bit (in the event_type column)
+
+# Readout window and the decay constants that set how pileup populates it.  The window bounds
+# were previously repeated as literals at each pileup draw; they are named here because the
+# equilibrium partition below depends on the window LENGTH and would silently go wrong if the
+# two copies ever diverged.
+WINDOW_LO, WINDOW_HI = -300.0, 500.0
+TAU_PI, TAU_MU = 26.033, 2196.981          # ns, charged-pion and muon mean lifetimes
+
+# --- Equilibrium accidental-time machinery -------------------------------------------------
+# In a CW beam the stopped-muon reservoir is in steady state, so the TOTAL accidental positron
+# rate across any readout window is exactly flat: the reservoir does not know the window
+# exists.  Split by where the parent pion arrived, the two pileup streams are NOT individually
+# flat, and generating both uniform (as this file did until 2026-07-31) makes the total RISE:
+#   OLD MUON (parent arrived before the window opened): the muons alive at window-open decay
+#     away memorylessly and their replacements arrive as the new-pion stream, so this class
+#     DECLINES across the window like the pi->mu->e delay SURVIVAL function
+#     S(x) = [tau_mu e^{-x/tau_mu} - tau_pi e^{-x/tau_pi}] / (tau_mu - tau_pi),
+#     x = time since window open.  Total weight lam * (1/T) Int_0^T S dx = lam * (1 - F_IN).
+#   NEW PION (parent arrives inside the window, uniform arrivals): its positron follows at the
+#     TRUE pi->mu->e delay, so this class turns on across the window; in-window positron yield
+#     lam * F_IN.  The two sum to a flat lam identically, term by term in time.
+# F_IN and the S-density sampler depend on the window length, so both are computed here.
+_T_WIN = float(WINDOW_HI - WINDOW_LO)
+_EQ_F_IN = 1.0 - (TAU_MU**2 * (1.0 - np.exp(-_T_WIN / TAU_MU))
+                  - TAU_PI**2 * (1.0 - np.exp(-_T_WIN / TAU_PI))) / (_T_WIN * (TAU_MU - TAU_PI))
+_x_grid = np.linspace(0.0, _T_WIN, 4001)
+_S_grid = (TAU_MU * np.exp(-_x_grid / TAU_MU)
+           - TAU_PI * np.exp(-_x_grid / TAU_PI)) / (TAU_MU - TAU_PI)
+_c = np.cumsum((_S_grid[1:] + _S_grid[:-1]) * 0.5 * np.diff(_x_grid))
+_S_CDF = np.concatenate([[0.0], _c]) / _c[-1]
+
+
+def sample_oldmuon_time():
+    """One positron time for the old-muon class: density proportional to S(t - WINDOW_LO)."""
+    return float(WINDOW_LO + np.interp(np.random.uniform(), _S_CDF, _x_grid))
 ELECTRON  = 0b001000
 GAMMA     = 0b010000
 OTHER     = 0b100000
 
-def extract_hits(row, pdg_mask_keep, origin_val, dt_offset=0.0):
+def extract_hits(row, pdg_mask_keep, origin_val, dt_offset=0.0, exclude_mask=0):
     """
-    Extracts hits from the Parquet row that match ANY bit in pdg_mask_keep.
-    Applies the time offset, and strictly DROPS any hits outside the [-300, 500] ns window.
+    Extracts hits from the Parquet row that match ANY bit in pdg_mask_keep and NO bit in
+    exclude_mask (the pdg field is a bitmask OR over contributing particles, so a merged
+    muon-Bragg/positron pixel carries both bits; the exclude lets a two-pass split place such
+    a pixel exactly once). Applies the time offset, and strictly DROPS any hits outside the
+    [-300, 500] ns window.
     """
     # ATAR
     atar_pdgs = np.array(row['atar_pdg'])
     atar_t_shifted = np.array(row['atar_t']) + dt_offset
-    
-    keep_atar = ((atar_pdgs & pdg_mask_keep) > 0) & (atar_t_shifted >= -300) & (atar_t_shifted <= 500)
+
+    keep_atar = ((atar_pdgs & pdg_mask_keep) > 0) & ((atar_pdgs & exclude_mask) == 0) \
+                & (atar_t_shifted >= -300) & (atar_t_shifted <= 500)
     
     atar_dict = {
         'x': np.array(row['atar_x'])[keep_atar].tolist(),
@@ -83,7 +122,8 @@ def extract_hits(row, pdg_mask_keep, origin_val, dt_offset=0.0):
     lyso_pdgs = np.array(row['lyso_pdg'])
     lyso_t_shifted = np.array(row['lyso_t']) + dt_offset
     
-    keep_lyso = ((lyso_pdgs & pdg_mask_keep) > 0) & (lyso_t_shifted >= -300) & (lyso_t_shifted <= 500)
+    keep_lyso = ((lyso_pdgs & pdg_mask_keep) > 0) & ((lyso_pdgs & exclude_mask) == 0) \
+                & (lyso_t_shifted >= -300) & (lyso_t_shifted <= 500)
     
     lyso_dict = {
         'x': np.array(row['lyso_x'])[keep_lyso].tolist(),
@@ -118,6 +158,32 @@ class PileupMixer:
             self.michel_df = self.michel_df[(et & 0x200) == 0].reset_index(drop=True)
             print(f"[mixer] drop_rmd: removed {n0 - len(self.michel_df):,} kMurad events "
                   f"({100*(n0-len(self.michel_df))/max(n0,1):.2f}%) from the michel pool")
+        # Pileup-DONOR eligibility.  A pi->e donor must never enter the accidental streams:
+        #   - the old-muon stream places the donor positron at a DELAYED decay time with the
+        #     parent pion/muon stub deliberately stripped, but pi->e follows its pion within
+        #     ~26 ns, so it cannot be an "old" decay at all -- the parent pion of an old muon
+        #     arrived microseconds ago and any pi->e positron it made is long gone;
+        #   - the new-pion stream re-times the donor positron with a fresh Exp(tau_mu) draw,
+        #     which is also wrong for pi->e (tau_pi = 26 ns, not 2197 ns).
+        # Both put a 69.8 MeV positron at a muon-decay time, which is what produced the 70 MeV
+        # bump in the pi->mu->e curve of fig5.  Exactly the drop_rmd failure one channel over,
+        # so it is fixed the same way: keep them out of the donor pool.  TRIGGERS are left
+        # alone -- a pi->e trigger in the michel pool is legitimate physics and the analysis
+        # purifies it (io.load_pool drops the kPienu bit), so the pool's luminosity count and
+        # composition are unchanged.
+        self._donor_idx = np.arange(len(self.michel_df), dtype=np.int64)
+        if 'event_type' in self.michel_df.columns:
+            _et = self.michel_df['event_type'].astype('int64').to_numpy()
+            _ok = (_et & 0x1) == 0                       # kPienu
+            self._donor_idx = np.flatnonzero(_ok).astype(np.int64)
+            _n_drop = int((~_ok).sum())
+            print(f"[mixer] pileup donors: excluded {_n_drop:,} pi->e events "
+                  f"({100.0 * _n_drop / max(len(_et), 1):.4f}%) -- pi->e cannot be a delayed "
+                  f"accidental; triggers unaffected")
+        else:
+            print("[mixer] WARNING: michel pool has no event_type column; pi->e donors "
+                  "CANNOT be excluded and will fake 69.8 MeV delayed accidentals")
+
         if pie_path:
             print(f"Loading PiE data from {pie_path}...")
             self.pie_df = pd.read_parquet(pie_path)
@@ -231,13 +297,16 @@ class PileupMixer:
         """Draw a michel-pool pileup-donor index, avoiding the trigger row itself when
         the trigger was ALSO drawn from the michel pool — so a pileup donor can never be
         the exact same event as the trigger (which would fake a multi-event coincidence)."""
-        n = len(self.michel_df)
+        pool_idx = self._donor_idx                 # pi->e donors already removed at load
+        n = len(pool_idx)
         avoid = trigger_idx if (trigger_pool is self.michel_df) else -1
-        if n <= 1:
+        if n == 0:
             return 0
-        j = np.random.randint(n)
+        if n == 1:
+            return int(pool_idx[0])
+        j = int(pool_idx[np.random.randint(n)])
         while j == avoid:
-            j = np.random.randint(n)
+            j = int(pool_idx[np.random.randint(n)])
         return j
 
     def _sample_calo_only_idx(self, trigger_pool, trigger_idx, max_tries=400):
@@ -279,7 +348,7 @@ class PileupMixer:
                        cal_only_fraction=0.0, radio_rate=2e7, enforce_window=False,
                        pie_mix_fraction=0.5, mudif_mix_fraction=0.0, pidif_mix_fraction=0.0,
                        trigger_gap_ns=2.0, max_reroll=16, no_replace=False,
-                       calo_michel_rate=0.0):
+                       calo_michel_rate=0.0, pileup_lam=0.24):
 
         if mode == 'mixed':
             if self.michel_df is None or self.pie_df is None:
@@ -508,47 +577,99 @@ class PileupMixer:
                     origin_counter += 1
             else:
                 # --- Standard Poisson Pipeline ---
-                # Poisson Expectation for an 800ns window at a 300kHz beam arrival rate
-                lam = 0.24
+                # Poisson Expectation for an 800ns window at a 300kHz beam arrival rate.
+                # pileup_lam=0 => a NO-PILEUP run (clean single-track michel/pie) for
+                # reconstruction-acceptance studies.
+                lam = pileup_lam
 
-                # 2. Pileup - Old Muon Decays
-                num_old_decays = np.random.poisson(lam)
+                # 2. Pileup - Old Muon Decays (parent pion arrived BEFORE the window)
+                # Rate lam*(1-F_IN) with the DECLINING S-shaped time density derived at the top
+                # of this file: muons alive at window-open deplete memorylessly and their
+                # replacements arrive as the new-pion stream below, so the two streams sum to a
+                # flat lam term by term in time.  HISTORY, so this is not re-litigated: the
+                # original code drew BOTH streams uniform at lam, which over-counts (1.15*lam)
+                # and rises across the window; a first fix scaled this stream by (1-F_IN) while
+                # leaving its placement uniform and the new-pion positron at its donor's
+                # recorded delay, which made the total rise HARDER (+0.84 -> +8.15 %/800ns,
+                # measured paired), because the donor recording caps that delay at the donor's
+                # own window and biases it prompt.  The full construction -- this rate, this
+                # density, and the true-delay retiming in stream 3 -- is required together.
+                num_old_decays = np.random.poisson(lam * (1.0 - _EQ_F_IN))
                 for _ in range(num_old_decays):
                     idx_bg = self._sample_pileup_idx(pool, idx)
                     bg_row = self.michel_df.iloc[idx_bg]
-                    
+
                     bg_atar_pdgs = np.array(bg_row['atar_pdg'], dtype=int)
                     pos_mask = (bg_atar_pdgs & POSITRON) > 0
                     if np.sum(pos_mask) == 0: continue
-                    
+
                     t_pos_raw = np.min(np.array(bg_row['atar_t'])[pos_mask])
-                    t_decay_target = np.random.uniform(-300, 500)
+                    t_decay_target = sample_oldmuon_time()
                     dt_shift = t_decay_target - t_pos_raw
                     
-                    a_bg, l_bg = extract_hits(bg_row, 0xFFFFFFFF, origin_val=origin_counter, dt_offset=dt_shift)
+                    # An OLD muon's parent pion arrived MICROSECONDS ago, so its pion/muon ATAR
+                    # stub cannot be in this readout window.  Anchoring on the positron and
+                    # shifting the whole donor drags that stub to t_decay_target - Delta, which
+                    # the [-300,500] cut then keeps for LATE placements and drops for early ones
+                    # -- imprinting a spurious time gradient on the accidental hit content
+                    # (measured: pi/mu hits 6.7 -> 19.1 from t'=-275 to +475, driving a -42%
+                    # gradient in the model's accidental matching efficiency).  Keep only the
+                    # positron's hits.  NB the pdg field is a BITMASK OR, so a merged
+                    # muon-Bragg/positron pixel (MUON|POSITRON) still passes and is retained.
+                    _keep_mask = 0xFFFFFFFF & ~(PION | MUON)
+                    a_bg, l_bg = extract_hits(bg_row, _keep_mask, origin_val=origin_counter, dt_offset=dt_shift)
                     accidental_pos_times.append(float(t_decay_target))  # old-muon positron time (in-window by construction)
                     merge_extracted(atar_hits, a_bg)
                     merge_extracted(lyso_hits, l_bg)
                     origin_counter += 1
 
-                # 3. Pileup - New Entering Pions
+                # 3. Pileup - New Entering Pions (parent arrives IN the window)
+                # The pion/muon stub is placed at the arrival time; the positron is RE-TIMED
+                # off the stub's own muon time with a fresh Exp(tau_mu) draw.  The donor's
+                # RECORDED positron delay must not be used: a donor is only in the pool if its
+                # positron fell inside its OWN readout window, which caps the recorded delay at
+                # ~T_WIN and biases it prompt.  With the true delay, ~85% of these positrons
+                # fall past the window end and are clipped by extract_hits; the ~15% that land
+                # inside are exactly the lam*F_IN that complete the flat total.
                 num_new_pions = np.random.poisson(lam)
                 for _ in range(num_new_pions):
                     idx_bg = self._sample_pileup_idx(pool, idx)
                     bg_row = self.michel_df.iloc[idx_bg]
-                    
-                    t_enter_target = np.random.uniform(-300, 500)
 
-                    # Record the new-pion positron time if its decay lands in the window.
-                    _np_pos = (np.array(bg_row['atar_pdg'], dtype=int) & POSITRON) > 0
-                    if np.sum(_np_pos) > 0:
-                        _t_np = float(np.min(np.array(bg_row['atar_t'])[_np_pos]) + t_enter_target)
-                        if -300.0 <= _t_np <= 500.0:
-                            accidental_pos_times.append(_t_np)
+                    t_enter_target = np.random.uniform(WINDOW_LO, WINDOW_HI)
 
-                    a_bg, l_bg = extract_hits(bg_row, 0xFFFFFFFF, origin_val=origin_counter, dt_offset=t_enter_target)
+                    # Stub: pion and muon pixels at the arrival time.  A merged muon-Bragg/
+                    # positron pixel (bitmask OR) is placed HERE, once -- its recorded time is
+                    # the muon's -- and excluded from the positron pass below.
+                    a_bg, l_bg = extract_hits(bg_row, PION | MUON,
+                                              origin_val=origin_counter, dt_offset=t_enter_target)
                     merge_extracted(atar_hits, a_bg)
                     merge_extracted(lyso_hits, l_bg)
+
+                    # Positron (plus its delta rays / gammas): everything carrying no pion or
+                    # muon bit, shifted so the positron sits at the freshly drawn decay time.
+                    _pdgs = np.array(bg_row['atar_pdg'], dtype=int)
+                    _ts = np.array(bg_row['atar_t'], float)
+                    _mu = (_pdgs & MUON) > 0
+                    _pi = (_pdgs & PION) > 0
+                    _pos = ((_pdgs & POSITRON) > 0) & ~_mu & ~_pi
+                    if np.sum(_pos) > 0:
+                        if np.sum(_mu) > 0:
+                            t_mu_rel = float(np.mean(_ts[_mu]))
+                        elif np.sum(_pi) > 0:
+                            t_mu_rel = float(np.max(_ts[_pi])) + np.random.exponential(TAU_PI)
+                        else:
+                            t_mu_rel = np.random.exponential(TAU_PI)
+                        t_e_target = t_enter_target + t_mu_rel + np.random.exponential(TAU_MU)
+                        t_pos_raw = float(np.min(_ts[_pos]))
+                        a_pe, l_pe = extract_hits(bg_row, 0xFFFFFFFF & ~(PION | MUON),
+                                                  origin_val=origin_counter,
+                                                  dt_offset=t_e_target - t_pos_raw,
+                                                  exclude_mask=PION | MUON)
+                        merge_extracted(atar_hits, a_pe)
+                        merge_extracted(lyso_hits, l_pe)
+                        if WINDOW_LO <= t_e_target <= WINDOW_HI:
+                            accidental_pos_times.append(float(t_e_target))
                     origin_counter += 1
 
                 # 4. Pileup - Calo-only michel decays (old-muon backlog whose positron
