@@ -1,0 +1,36 @@
+{
+  "passed": true,
+  "checks": [
+    "final generation source/export exact Parquet-value parity: 12 pie events in 2 chunks, seed 4101, physical pileup and real LUTs",
+    "origin reslicing exact Parquet-value parity against original script across chunk boundaries",
+    "origin separation, zero-energy mean fallback, and empty-event handling checked",
+    "strict combine preserves all 12 rows/columns/order exactly across two shards",
+    "grouped pool assembly selects exact sorted-file range",
+    "FAST3 array source/export exact parity for noise on/off and stretch 1/2; real mixed-file CLI passed",
+    "existing combined outputs refused",
+    "schema mismatch rejected before creating combined output",
+    "ROOT converter imports with ROOT explicitly unavailable; all 9 command --help checks passed"
+  ],
+  "full_root_conversion_run": false,
+  "full_production_regeneration_run": false,
+  "notes": [
+    "Original physics/seed/chunk behavior preserved; no_replace remains scoped to generate_batch.",
+    "Real G4Pioneer/PyROOT conversion remains dependent on external simulation runtime and ROOT input files."
+  ],
+  "isolated_container_smoke": {
+    "passed": true,
+    "container": "/data/raid3/eliza7/PIONEER/data/ML_TEST/pytorch.sif",
+    "binding": "release only, plus temporary output folder",
+    "commands": [
+      "purity.preprocessing.generate_tail_reveal",
+      "purity.preprocessing.origin_reslice",
+      "purity.final_analysis.combine_events",
+      "purity.preprocessing.root_to_parquet"
+    ],
+    "events": 12,
+    "channel": "michel",
+    "no_replace": true,
+    "seed": 9001,
+    "chunk_size": 6
+  }
+}

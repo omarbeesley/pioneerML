@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "source_path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/final_plots/fig8_timefit_fixed.py",
+  "source_sha256": "cea46c8e1cda4738bb44081764fa1ee7756f213e4bf77352d627c5b4c6ad4c26",
+  "export_path": "src/purity/final_analysis/time_fit.py",
+  "export_sha256": "ac06522e0f8187877c8170d478b1304c29f1b1c8cc4c722130644107897bf763",
+  "changes": [
+    "Replace absolute input/output paths and research-package imports with CLI parameters and purity.measurement imports.",
+    "Wrap the historical computation as run() and main(); preserve central formulas, slopes, windows, binning, 1500 Gaussian toys and seed11.",
+    "Remove obsolete comment claiming the low-bin slope is imported into the high bin; the actual final high-bin slope remains0.",
+    "Write metrics and histograms to strict JSON, mapping undefined values to null with a path list.",
+    "Reject missing scientific input columns; handle empty plotted histograms and zero denominators without changing defined central values.",
+    "Explicitly label historical error-estimation limitations rather than presenting the Gaussian toys as event bootstrap."
+  ],
+  "historical_frozen_inputs": {
+    "pie_rows": 8791255,
+    "pie_shards": 34,
+    "michel_rows": 97613456,
+    "michel_shards": 377,
+    "run": "fl2timefit_1776963",
+    "note": "These sizes identify the documented combined snapshots, not a manifest or checksum of all historical contributing input shards."
+  },
+  "validation": {
+    "status": "passed",
+    "report": "provenance/validation_time_fit.json",
+    "scope": "Exact original/exported central fit and historical toy-error parity on 12000 synthetic rows per pool; isolated CLI on 32 rows per pool. No full frozen-input fit."
+  },
+  "measurement_source_sha256": {
+    "io.py": "2e2c66fb42baa67fa7f111879e3964e83714250ea5f0f9a5d7625b1b5b768b59",
+    "measurement.py": "0f101096c1a451fc3c11c7b614d02d673d1539df81b758caa2fd1eef91943ea8"
+  }
+}

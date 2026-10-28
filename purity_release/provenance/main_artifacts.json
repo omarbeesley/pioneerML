@@ -1,0 +1,381 @@
+{
+ "schema_version": 1,
+ "audited_on": "2026-09-10",
+ "selected_model": {
+  "run": "main_hybridv2_filmg2",
+  "epoch": 19,
+  "training_completed_local_date": "2026-07-29",
+  "selection_evidence": "Final tail/reconstruction analysis reads ep19tg pie and ep19 michel_inwin summaries; their actual launchers pin filmg2 epoch19. Latest run also has epoch20/best, which must not silently replace ep19."
+ },
+ "artifacts": [
+  {
+   "filename": "main_hybridv2_filmg2_epoch19.pth",
+   "original_path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/model_weights/main_hybridv2_filmg2_epoch19.pth",
+   "sha256": "89af5f93661aa38e2788530dd94b0a694be5165ab5d9719437a16a9793428f97",
+   "size_bytes": 113174709,
+   "purpose": "Pinned final reconstruction analysis checkpoint; selected for this release.",
+   "metadata": {
+    "epoch": 19,
+    "stage": 2,
+    "global_step": 189767,
+    "train_loss": -0.04045789801590421,
+    "val_loss": -0.05187286288321775,
+    "task_weights": {
+     "w_atar_slice_multi": 0.05,
+     "w_node_pdg": 1.0,
+     "w_slice_pdg": 0.1,
+     "w_endpoints": 0.01,
+     "w_lyso_condensation": 0.25,
+     "w_atar_trigger_slice": 0.5,
+     "w_chain_exclusive": 5.0,
+     "role_ce_positron_weight": 5.0,
+     "w_time_spread": 1.0,
+     "time_spread_thresh_ns": 1.0,
+     "time_spread_trig_floor": 0.25,
+     "time_spread_mip_floor": 0.25,
+     "w_pion_kinematics": 50.0,
+     "w_positron_angle": 0.25,
+     "angle_match_gate": true,
+     "w_angle_decorr": 0.05,
+     "decorr_window": 10,
+     "w_event_builder": 0.2,
+     "w_has_trigger_positron": 0.0,
+     "w_dead_energy": 0.005
+    }
+   },
+   "parameter_count": 9806509
+  },
+  {
+   "filename": "main_hybridv2_filmg2_epoch20.pth",
+   "original_path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/model_weights/main_hybridv2_filmg2_epoch20.pth",
+   "sha256": "f1495be0bd735cbb524f4ba8414b7d4d78ac354fe28b3f37208912040ef49950",
+   "size_bytes": 113174709,
+   "purpose": "Last epoch of latest located main training run; not the checkpoint used by final ep19 analysis.",
+   "metadata": {
+    "epoch": 20,
+    "stage": 2,
+    "global_step": 199754,
+    "train_loss": -0.048758707350750156,
+    "val_loss": -0.05986781879827322,
+    "task_weights": {
+     "w_atar_slice_multi": 0.05,
+     "w_node_pdg": 1.0,
+     "w_slice_pdg": 0.1,
+     "w_endpoints": 0.01,
+     "w_lyso_condensation": 0.25,
+     "w_atar_trigger_slice": 0.5,
+     "w_chain_exclusive": 5.0,
+     "role_ce_positron_weight": 5.0,
+     "w_time_spread": 1.0,
+     "time_spread_thresh_ns": 1.0,
+     "time_spread_trig_floor": 0.25,
+     "time_spread_mip_floor": 0.25,
+     "w_pion_kinematics": 50.0,
+     "w_positron_angle": 0.25,
+     "angle_match_gate": true,
+     "w_angle_decorr": 0.05,
+     "decorr_window": 10,
+     "w_event_builder": 0.2,
+     "w_has_trigger_positron": 0.0,
+     "w_dead_energy": 0.005
+    }
+   },
+   "parameter_count": 9806509
+  },
+  {
+   "filename": "main_hybridv2_filmg2_best.pth",
+   "original_path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/model_weights/main_hybridv2_filmg2_best.pth",
+   "sha256": "fec07d3b1e15f6e3cf9b678ef867a6cbb99fbfe5a69c65bdcaba913a25ea0a54",
+   "size_bytes": 113169355,
+   "purpose": "Best validation-loss checkpoint of latest located run; metadata identifies epoch 20.",
+   "metadata": {
+    "epoch": 20,
+    "stage": 2,
+    "global_step": 199754,
+    "train_loss": -0.048758707350750156,
+    "val_loss": -0.05986781879827322,
+    "task_weights": {
+     "w_atar_slice_multi": 0.05,
+     "w_node_pdg": 1.0,
+     "w_slice_pdg": 0.1,
+     "w_endpoints": 0.01,
+     "w_lyso_condensation": 0.25,
+     "w_atar_trigger_slice": 0.5,
+     "w_chain_exclusive": 5.0,
+     "role_ce_positron_weight": 5.0,
+     "w_time_spread": 1.0,
+     "time_spread_thresh_ns": 1.0,
+     "time_spread_trig_floor": 0.25,
+     "time_spread_mip_floor": 0.25,
+     "w_pion_kinematics": 50.0,
+     "w_positron_angle": 0.25,
+     "angle_match_gate": true,
+     "w_angle_decorr": 0.05,
+     "decorr_window": 10,
+     "w_event_builder": 0.2,
+     "w_has_trigger_positron": 0.0,
+     "w_dead_energy": 0.005
+    }
+   },
+   "parameter_count": 9806509
+  },
+  {
+   "filename": "main_hybridv2_filmg_epoch4.pth",
+   "original_path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/model_weights/main_hybridv2_filmg_epoch4.pth",
+   "sha256": "3bc888990ce6a27543048c801a5339cd36ff03da25d76bc13f76a6aa0210a2c2",
+   "size_bytes": 113167385,
+   "purpose": "Resume ancestor: first four epochs used angle decorrelation weight 0.5.",
+   "metadata": {
+    "epoch": 4,
+    "stage": 2,
+    "global_step": 39950,
+    "train_loss": 0.07202814118755746,
+    "val_loss": 0.06971842216023652,
+    "task_weights": {
+     "w_atar_slice_multi": 0.05,
+     "w_node_pdg": 1.0,
+     "w_slice_pdg": 0.1,
+     "w_endpoints": 0.01,
+     "w_lyso_condensation": 0.25,
+     "w_atar_trigger_slice": 0.5,
+     "w_chain_exclusive": 5.0,
+     "role_ce_positron_weight": 1.0,
+     "w_time_spread": 1.0,
+     "time_spread_thresh_ns": 1.0,
+     "time_spread_trig_floor": 0.25,
+     "time_spread_mip_floor": 0.25,
+     "w_pion_kinematics": 50.0,
+     "w_positron_angle": 0.25,
+     "angle_match_gate": true,
+     "w_angle_decorr": 0.5,
+     "decorr_window": 10,
+     "w_event_builder": 0.2,
+     "w_has_trigger_positron": 0.0,
+     "w_dead_energy": 0.005
+    }
+   },
+   "parameter_count": 9806509
+  },
+  {
+   "filename": "PURITY_v3a_best.pth",
+   "original_path": "/home/obeesley/pioneerML/model_weights/PURITY_v3a_best.pth",
+   "sha256": "095ac082c21ae5e3f9ab5491f48fef23f4a05dd406f2125ffe270c82a6b2125e",
+   "size_bytes": 109876773,
+   "purpose": "Older May 2026 repository-local snapshot; best checkpoint metadata identifies epoch 16.",
+   "metadata": {
+    "epoch": 16,
+    "stage": 2,
+    "global_step": 159362,
+    "train_loss": -0.01060367686155974,
+    "val_loss": -0.034034978195295926,
+    "task_weights": {
+     "w_atar_slice_multi": 0.05,
+     "w_node_pdg": 1.0,
+     "w_slice_pdg": 0.1,
+     "w_endpoints": 0.01,
+     "w_lyso_condensation": 0.25,
+     "w_atar_trigger_slice": 0.5,
+     "w_time_spread": 1.0,
+     "time_spread_thresh_ns": 1.0,
+     "time_spread_trig_floor": 0.25,
+     "time_spread_mip_floor": 0.25,
+     "w_pion_kinematics": 50.0,
+     "w_positron_angle": 0.25,
+     "w_angle_decorr": 0.0,
+     "decorr_window": 10,
+     "w_event_builder": 0.2,
+     "w_has_trigger_positron": 0.0,
+     "w_dead_energy": 0.005
+    }
+   },
+   "parameter_count": 9117952
+  }
+ ],
+ "inference_provenance": {
+  "profile": "ep19tg",
+  "environment": {
+   "PURITY_GATE_MODE": "best_xy",
+   "PURITY_BEST_XY_BETA": "0.5",
+   "PURITY_ROLE_FILM": "1",
+   "PURITY_ENERGY_TIME_GATE_NS": "5.0",
+   "PURITY_MAX_HITS": "250"
+  },
+  "dropout": 0.0,
+  "mode": "train",
+  "historical_cli_default_batch_size": 200,
+  "mc_passes": 1,
+  "historical_random_seed": null,
+  "release_random_seed": 0,
+  "seed_note": "Seed 0 is an explicit release setting; no historical inference seed was recorded in these launchers. Dropout is disabled for this main model.",
+  "truth_positron_mask": false,
+  "variant_note": "ep19tg enables the 5 ns positron-energy time gate. fl and fl2 use the same ep19 model and 5 ns gate with regenerated mixed datasets. fl2 excludes pi->e donors from accidental streams; its launcher comments include stale epoch10 text, but the executable command loads epoch19."
+ },
+ "training_provenance": {
+  "train_path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/train10M_fixed/train.parquet",
+  "validation_path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/train10M_fixed/val.parquet",
+  "epoch_mode": "chunked",
+  "chunk_seed": 12345,
+  "epoch_size": 1000000,
+  "max_hits": 250,
+  "epochs": 20,
+  "dropout": 0.0,
+  "weight_decay": 0.001,
+  "val_max_batches": 1000,
+  "stage2_epoch": 2,
+  "resume_checkpoint": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/model_weights/main_hybridv2_filmg_epoch4.pth",
+  "resume_learning_rates": {
+   "base": 0.00025,
+   "event": 0.00025,
+   "bias": 0.0005
+  },
+  "phases": [
+   {
+    "run": "main_hybridv2_filmg",
+    "epochs": [
+     1,
+     4
+    ],
+    "w_angle_decorr": 0.5
+   },
+   {
+    "run": "main_hybridv2_filmg2",
+    "epochs": [
+     5,
+     20
+    ],
+    "w_angle_decorr": 0.05
+   }
+  ],
+  "note": "Exact historical retraining requires the phase-specific loss configuration and source revision. Checkpoints store model/optimizer/scheduler/loss weights, but not full CLI arguments or environment. The current models_v2.py hash differs from the training log; its final inference variant is recorded separately."
+ },
+ "source_fingerprints": [
+  {
+   "original_path": "/home/obeesley/pioneerML/unified_reco/models.py",
+   "sha256": "63d901b8529b911e84ba5657c57aaf9f7619b3fbffa4edcb72f16e0f66fdc462",
+   "current_md5": "c2b302fe4dc78ab9b2cace8ed6dcc2c2",
+   "training_log_md5": "c2b302fe4dc78ab9b2cace8ed6dcc2c2",
+   "matches_training_log": true
+  },
+  {
+   "original_path": "/home/obeesley/pioneerML/unified_reco/models_v2.py",
+   "sha256": "3c6326a198e6a49cb6665b9729baad39f1cca077b4d4629341aac5b0fea1f918",
+   "current_md5": "168ca78fb49c32fa854b5e29f26176b9",
+   "training_log_md5": "90d2222223cc29e7dd044ce8a1357884",
+   "matches_training_log": false
+  },
+  {
+   "original_path": "/home/obeesley/pioneerML/unified_reco/dataset.py",
+   "sha256": "6aa02ebf74d47c51c985c16378b35aa68e61ea793b3c348033c418891624d493",
+   "current_md5": "e079ed222f207130920bd0c806fcb0a2",
+   "training_log_md5": "e079ed222f207130920bd0c806fcb0a2",
+   "matches_training_log": true
+  },
+  {
+   "original_path": "/home/obeesley/pioneerML/unified_reco/train_purity.py",
+   "sha256": "b0e8ca4f69604bdbd4c44c3692946d8e522572b40f1fc775a5091be8bf878f55",
+   "current_md5": "3dd1dd4e763cf0db4bfd9d07d55afd55",
+   "training_log_md5": "3dd1dd4e763cf0db4bfd9d07d55afd55",
+   "matches_training_log": true
+  }
+ ],
+ "evidence_files": [
+  {
+   "original_path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/train_filmg2.sbatch",
+   "sha256": "650ae63b664266dc783f1b6928dd232039ffd609cbb9f8612e6542a2441a0e51",
+   "relevant_lines": [
+    9,
+    15,
+    94,
+    100,
+    105
+   ]
+  },
+  {
+   "original_path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/train_filmg.sbatch",
+   "sha256": "32cc62764fe1457789e9e38dd45d3ad1ebe0e4f550e73194aa49fdbc118a8a65",
+   "relevant_lines": [
+    86,
+    95
+   ]
+  },
+  {
+   "original_path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/reco_ep19_michel_inwin.sbatch",
+   "sha256": "2f5f7dfa31d3ab548995138860e8b621510ad9c8194bee64a99ed3212e45cdb2",
+   "relevant_lines": [
+    28,
+    33
+   ]
+  },
+  {
+   "original_path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/reco_ep19_pie_rest.sbatch",
+   "sha256": "bc7fa3cd3ff0219cc8b90ec72ea2a08ad207d721672d8f75f0def46735e6e803",
+   "relevant_lines": [
+    19,
+    24
+   ]
+  },
+  {
+   "original_path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/eval_filmg2_ep19tg_pie.sbatch",
+   "sha256": "9ce091872f9f66ac39a93efd4d129f6fc1624b9c381891abe083f91f628eb32c",
+   "relevant_lines": [
+    22,
+    26
+   ]
+  },
+  {
+   "original_path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/michel_flat_big2.sbatch",
+   "sha256": "ff7a921d3a599dc2cedd14bc8e7d92a441eda3359b00264f9440e059c0268a1d",
+   "relevant_lines": [
+    8,
+    10,
+    51,
+    55
+   ]
+  },
+  {
+   "original_path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/pie_flat_chain2.sbatch",
+   "sha256": "f0c797c025c7159b9a3e340c93a28e33aebd8d6a70efb013a9b3a070d07e217e",
+   "relevant_lines": [
+    37,
+    42
+   ]
+  },
+  {
+   "original_path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/logs/train_purity_filmg2_1706750.log",
+   "sha256": "b0db794e73c97abb40d2a075159452263029a049b25f4bf79938186586c95ea2",
+   "relevant_lines": [
+    4,
+    367,
+    387
+   ]
+  },
+  {
+   "original_path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/model_weights/main_hybridv2_filmg2_loss_history.txt",
+   "sha256": "05bca08d06a773df81777a31a1c2e964e0e2086f273c63feb0ba9801b5e38c9e",
+   "relevant_lines": [
+    15,
+    16
+   ]
+  }
+ ],
+ "validation": {
+  "strict_checkpoint_load": "passed",
+  "source": "Current original unified_reco/models.py + models_v2.py, PURITY_ROLE_FILM=1, dropout=0.0",
+  "torch_version": "2.7.0+cu128",
+  "container_original_path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/pytorch.sif",
+  "device": "cpu",
+  "result": "All keys matched successfully; 9806509 parameters; every Dropout module has p=0.0.",
+  "scope": "Checkpoint compatibility only. No full inference, training or numerical performance reproduction performed by this check."
+ },
+ "release_checkpoint": {
+  "file": "checkpoints/main_hybridv2_filmg2_epoch19.pth",
+  "sha256": "6e9ef16a981b3af186d817ecaa6573ce1c9989a36462ddc6fd0e467b129ee845",
+  "bytes": 39370261,
+  "content": "weights-only copy of the original training checkpoint: optimizer and scheduler state removed; model tensors and metadata identical",
+  "original": {
+   "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/model_weights/main_hybridv2_filmg2_epoch19.pth",
+   "sha256": "89af5f93661aa38e2788530dd94b0a694be5165ab5d9719437a16a9793428f97"
+  },
+  "validation": "provenance/validation_weights_only.json"
+ }
+}

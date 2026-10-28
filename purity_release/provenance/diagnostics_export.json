@@ -1,0 +1,53 @@
+{
+  "sources": [
+    {
+      "source": "/home/obeesley/pioneerML/unified_reco/plot_benchmarks.py",
+      "source_sha256": "ca6a2ed914c1a7a5c50d07da2083c4a4663fa81d0c17be18b9cc411272e19ae7",
+      "destination": "src/purity/diagnostics/benchmark_plots.py",
+      "changes": "Namespace portability; explicit/protected outputs; run records where figures are written; invalid-population guards for historical Michel-only cut scans."
+    },
+    {
+      "source": "/home/obeesley/pioneerML/unified_reco/sweep_cuts.py",
+      "source_sha256": "51598a4519974738d7a0be78c3dc078faf6c93d3c78faaa62d1b64fe22031532",
+      "destination": "src/purity/diagnostics/cut_sweep.py",
+      "changes": "Namespace portability; explicit/protected outputs; run records where figures are written; invalid-population guards for historical Michel-only cut scans."
+    },
+    {
+      "source": "/home/obeesley/pioneerML/unified_reco/cutflow.py",
+      "source_sha256": "b7606e96b800b8e6cc1d6cfd517f39ed3cc1acb0efcc932089fae5e5f05170d1",
+      "destination": "src/purity/diagnostics/historical_cutflow.py",
+      "changes": "Namespace portability; explicit/protected outputs; run records where figures are written; invalid-population guards for historical Michel-only cut scans."
+    },
+    {
+      "source": "/home/obeesley/pioneerML/unified_reco/cut_tables.py",
+      "source_sha256": "61f508ee504776cc953a2995362375b50b8c8d1d2cbb580ef0aaf033a769ad8b",
+      "destination": "src/purity/diagnostics/per_head_tables.py",
+      "changes": "Namespace portability; explicit/protected outputs; run records where figures are written; invalid-population guards for historical Michel-only cut scans."
+    },
+    {
+      "source": "/home/obeesley/pioneerML/unified_reco/remu_counting.py",
+      "source_sha256": "92c92ff5c8524bc98a9b464ce8a39f5c07261c8a398419482ba89ce2c7bae647",
+      "destination": "src/purity/diagnostics/counting.py",
+      "changes": "Namespace portability; explicit/protected outputs; run records where figures are written; invalid-population guards for historical Michel-only cut scans."
+    },
+    {
+      "source": "/home/obeesley/pioneerML/unified_reco/remu_bias.py",
+      "source_sha256": "03d6934a4884387a92007d4687c96114b93edbaf09bb195a58c41037c2c79a26",
+      "destination": "src/purity/diagnostics/counting_bias.py",
+      "changes": "Namespace portability; explicit/protected outputs; run records where figures are written; invalid-population guards for historical Michel-only cut scans."
+    },
+    {
+      "source": "/home/obeesley/pioneerML/unified_reco/event_display.py",
+      "source_sha256": "59550e5ed9db9f4ae10c39c9cc6bb74134d8784c0b1385e8090b5aa5b0e4e70d",
+      "destination": "src/purity/diagnostics/event_display.py",
+      "changes": "Namespace portability; explicit/protected outputs; run records where figures are written; invalid-population guards for historical Michel-only cut scans."
+    },
+    {
+      "source": "/home/obeesley/pioneerML/unified_reco/eval_tail.py",
+      "source_sha256": "9aea2913dafad7477eabbcc721a25f32623c5c838cba58b7b86d2105393eb012",
+      "destination": "src/purity/diagnostics/_tail_score_functions.py",
+      "changes": "Copied offline analysis function bodies; torch/F imports moved inside the logistic-fusion fit; inference/dataset imports omitted."
+    }
+  ],
+  "scope": "Reusable and historical diagnostics; final thesis recipes are explicitly separate."
+}

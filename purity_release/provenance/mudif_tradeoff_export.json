@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "source": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/mudif_tradeoff.py",
+  "source_sha256": "1e7036de2bfba6085e59ba7928b1f6b5836956069a9c732b53a3fb5612f1dfff",
+  "source_lines": 44,
+  "export": "src/purity/final_analysis/tail/mudif_tradeoff.py",
+  "export_sha256": "12757525ee214862520ad8a1bdaec1235b80fdebfa587652e95c7535af793e4f",
+  "coverage": "Complete completed original plotting entry point",
+  "direct_local_dependencies": [
+    {
+      "path": "src/purity/final_analysis/tail/_runtime.py",
+      "sha256": "71fc4bf742b742d0b5723d06ea5c8d774d4efa39108ef42f7b2480bf6d2384c7"
+    }
+  ],
+  "historical_version": {
+    "input": "Original pie5M_pie_full.parquet and tail_reveal_eval10/predictions.parquet (plain filename). Both explicitly required as --pie-pred and --mudif-pred; no automatic predictions_drop substitution.",
+    "calculation": "Signal E=deposited_energy+dead_E+Epure; muDIF E=deposited_energy+dead_E; truth acceptance>=1, finite E<=75. Low-bin signal rescaled to0.006 before contamination calculation. Relative efficiency tail/peak gives signed percent bias; nested binomial uncertainty retained.",
+    "defaults": {
+      "R_PIE": 0.0001,
+      "pie_to_mudif_ratio_at_acceptance": 20.0,
+      "real_tail": 0.006,
+      "energy_split": 56.0,
+      "energy_max": 75.0,
+      "signal_efficiency_percent": [
+        99,
+        95,
+        90,
+        80,
+        70,
+        50,
+        30
+      ]
+    },
+    "layout": "One9\u00d76.2in axis, seven labeled signal-efficiency points, linear contamination x and signed percent bias y.",
+    "output_stem": "22_mudif_bias_vs_contam",
+    "distinct_from": "diagnostics.py uses norad_joined*_v2 and predictions_drop with related estimator; mudif.py/tradeoff.py use the later reconstructed-energy full chain and18:1 norm. No interchange of these versions is implied."
+  },
+  "operational_changes": [
+    "External original top-level script wrapped into explicit calculate/render/main functions.",
+    "Explicit --pie-pred,--mudif-pred,--output-dir replace hardcoded source/output paths.",
+    "Missing/unpopulated/nonfinite input computations fail explicitly.",
+    "Fresh output required and run/input/source record added.",
+    "Keep original PNG stem and additionally write PDF and numeric JSON."
+  ],
+  "validation": {
+    "path": "provenance/validation_mudif_tradeoff.json",
+    "sha256": "c9935468b09c7c22f65926b82f5c9134861c323b64ebcd9de072c874638aa4c6"
+  },
+  "bundled_data": "No extra input cohorts or generated plots bundled by this export."
+}

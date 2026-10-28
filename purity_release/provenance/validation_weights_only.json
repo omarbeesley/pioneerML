@@ -1,0 +1,101 @@
+{
+ "schema_version": 1,
+ "status": "passed",
+ "checked_utc": "2026-10-28",
+ "slurm_jobs": [
+  2286286
+ ],
+ "scope": "Release checkpoints replaced by weights-only copies (GitHub 100 MB file limit). Every model tensor and all metadata compared with the original; both models run through the pinned profiles on 1500-row tail10 pie and michel evaluation slices and compared column by column with the full-checkpoint run of job 2286278.",
+ "checkpoints": {
+  "main_hybridv2_filmg2_epoch19.pth": {
+   "keys_kept": [
+    "epoch",
+    "global_step",
+    "model",
+    "stage",
+    "task_weights",
+    "train_loss",
+    "val_loss"
+   ],
+   "dropped": [
+    "optimizer",
+    "scheduler"
+   ],
+   "tensors": 392,
+   "tensors_identical": true,
+   "metadata_identical": true,
+   "sha256": "6e9ef16a981b3af186d817ecaa6573ce1c9989a36462ddc6fd0e467b129ee845",
+   "bytes": 39370261,
+   "original_sha256": "89af5f93661aa38e2788530dd94b0a694be5165ab5d9719437a16a9793428f97",
+   "original_path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/model_weights/main_hybridv2_filmg2_epoch19.pth"
+  },
+  "PURITY_TAIL10_epoch10.pth": {
+   "keys_kept": [
+    "epoch",
+    "freeze_trunk",
+    "model",
+    "train_loss",
+    "val_loss"
+   ],
+   "dropped": [
+    "optimizer",
+    "scheduler"
+   ],
+   "tensors": 421,
+   "tensors_identical": true,
+   "metadata_identical": true,
+   "sha256": "7015da10b6c0d53f7a8ab94034a331ded3cbd4baca278b982e4e907f86a555ec",
+   "bytes": 29673103,
+   "original_sha256": "6ed827b9707f7f5a4b35dabba8117d95a0766309baded74632ebaae654d651ce",
+   "original_path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/model_weights/PURITY_TAIL10_epoch10.pth"
+  }
+ },
+ "output_parity": {
+  "main/mic_events.parquet": {
+   "rows": 1500,
+   "columns": 58,
+   "differing": []
+  },
+  "main/mic_lyso_clusters.parquet": {
+   "rows": 7500,
+   "columns": 4,
+   "differing": []
+  },
+  "main/mic_lyso_hits.parquet": {
+   "rows": 26967,
+   "columns": 14,
+   "differing": []
+  },
+  "main/mic_slices.parquet": {
+   "rows": 4391,
+   "columns": 28,
+   "differing": []
+  },
+  "main/pie_events.parquet": {
+   "rows": 1493,
+   "columns": 58,
+   "differing": []
+  },
+  "main/pie_lyso_clusters.parquet": {
+   "rows": 7465,
+   "columns": 4,
+   "differing": []
+  },
+  "main/pie_lyso_hits.parquet": {
+   "rows": 36576,
+   "columns": 14,
+   "differing": []
+  },
+  "main/pie_slices.parquet": {
+   "rows": 4171,
+   "columns": 28,
+   "differing": []
+  },
+  "tail/predictions.parquet": {
+   "rows": 2993,
+   "columns": 34,
+   "differing": []
+  }
+ },
+ "resume_note": "Weights-only copies carry no optimizer state; purity.training.main and purity.training.tail resume them with a fresh optimizer. Use the originals for an exact training resume."
+}

@@ -1,0 +1,23 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+build/
+dist/
+outputs/
+.pytest_cache/
+# The selected weights belong to this self-contained handoff.
+!checkpoints/*.pth
+# These tiny, documented examples belong to this release, even inside the old repo.
+!examples/*.parquet
+
+# Small example events and detector lookup tables belong to this release.
+!examples/**/*.parquet
+!assets/**/*.npy
+
+# The parent research repo ignores diagnostic output folders; this is source.
+!src/purity/diagnostics/
+!src/purity/diagnostics/**
+# ...except compiled bytecode.
+src/purity/diagnostics/**/__pycache__/
+*.py[cod]

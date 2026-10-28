@@ -1,0 +1,38 @@
+{
+  "validation": "synthetic parity against extracted original source functions",
+  "events": 8000,
+  "rng_seed": 1109,
+  "checks": [
+    "acceptance formulas exactly match original at upper edge 500 ns",
+    "acceptance formulas exactly match original at upper edge 495 ns",
+    "performance formulas exactly match original for pie, including purification",
+    "performance formulas exactly match original for michel, including purification",
+    "missing-column input rejected explicitly",
+    "small samples report null for underpopulated angular bins",
+    "existing result or input-manifest paths rejected before reading datasets"
+  ],
+  "archived_full_pool_json_reproduced": false,
+  "limitations": [
+    "No full data rerun; current shard globs differ from historical reference populations."
+  ],
+  "real_inference_cli_smoke": {
+    "passed": true,
+    "channels": [
+      "pie",
+      "michel"
+    ],
+    "events_per_channel": 16,
+    "inputs": [
+      "outputs/smoke/main/sample_000_pie_events.parquet",
+      "outputs/smoke/main/sample_001_michel_events.parquet"
+    ],
+    "commands": [
+      "python -m purity.final_analysis.performance",
+      "python -m purity.final_analysis.acceptance_bias"
+    ],
+    "options": {
+      "min_shard_bytes": 0
+    },
+    "result": "Both commands wrote strict JSON results and exact selected-file manifests."
+  }
+}

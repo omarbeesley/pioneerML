@@ -1,0 +1,20 @@
+{
+  "observed_runtime": "/data/raid3/eliza7/PIONEER/data/ML_TEST/pytorch.sif",
+  "python": "3.11.12 | packaged by conda-forge | (main, Apr 10 2025, 22:23:25) [GCC 13.3.0]",
+  "packages": {
+    "torch": "2.7.0+cu128",
+    "torch-geometric": "2.7.0",
+    "torch-scatter": "2.1.2+pt27cu128",
+    "torch-sparse": "0.6.18+pt27cu128",
+    "torch-cluster": "1.6.3+pt27cu128",
+    "torch-spline-conv": "1.2.2+pt27cu128",
+    "pyg-lib": "0.5.0+pt27cu128",
+    "numpy": "2.2.5",
+    "pandas": "3.0.2",
+    "pyarrow": "24.0.0",
+    "scipy": "1.17.1",
+    "matplotlib": "3.10.9",
+    "tqdm": "4.67.1"
+  },
+  "validation": "Observed installed versions in the production container; not a newly resolved lockfile. Native installation and GPU execution not validated by this export."
+}

@@ -1,0 +1,149 @@
+{
+  "scope": "32-example CPU CLI smoke; not a full benchmark or numerical result reproduction.",
+  "runs": [
+    {
+      "family": "main",
+      "status": "passed",
+      "configuration": {
+        "schema_version": 1,
+        "model": "main",
+        "model_class": "PURITYHybridModelV2",
+        "checkpoint": "checkpoints/main_hybridv2_filmg2_epoch19.pth",
+        "checkpoint_sha256": "89af5f93661aa38e2788530dd94b0a694be5165ab5d9719437a16a9793428f97",
+        "model_kwargs": {
+          "dropout": 0.0
+        },
+        "environment": {
+          "PURITY_GATE_MODE": "best_xy",
+          "PURITY_BEST_XY_BETA": "0.5",
+          "PURITY_ROLE_FILM": "1",
+          "PURITY_ENERGY_TIME_GATE_NS": "5.0",
+          "PURITY_MAX_HITS": "250"
+        },
+        "inference": {
+          "model_version": "v2",
+          "mode": "train",
+          "batch_size": 200,
+          "max_hits": 250,
+          "mc_passes": 1,
+          "seed": 0
+        },
+        "provenance": "provenance/main_artifacts.json"
+      },
+      "input_rows": 32,
+      "output_tables": [
+        {
+          "file": "sample_000_pie_events.parquet",
+          "rows": 16,
+          "columns": 56,
+          "sha256": "1da77be4b885f6ffea17708db4e1d368aa5821e533638e8f28c264e87c814860"
+        },
+        {
+          "file": "sample_000_pie_lyso_clusters.parquet",
+          "rows": 80,
+          "columns": 4,
+          "sha256": "0eba3cd1de517b4c8d5f2997646c024892bd55098005ed89f9eafb8790b99d38"
+        },
+        {
+          "file": "sample_000_pie_lyso_hits.parquet",
+          "rows": 416,
+          "columns": 14,
+          "sha256": "c5717ea8247c1d0ed5b9a7df458ae3731e3e0df93fddd22af129d2b146c1052e"
+        },
+        {
+          "file": "sample_000_pie_slices.parquet",
+          "rows": 38,
+          "columns": 28,
+          "sha256": "e54129a79c515543cd91a2692257eef53cf3d5ac1f24fdb02d1c142e2768cc8b"
+        },
+        {
+          "file": "sample_001_michel_events.parquet",
+          "rows": 16,
+          "columns": 56,
+          "sha256": "1ec3fae7f3b18f433461c424337dbeddcfeb68d6efe38866770a685ea95c7d22"
+        },
+        {
+          "file": "sample_001_michel_lyso_clusters.parquet",
+          "rows": 80,
+          "columns": 4,
+          "sha256": "686a3210e9f39be3c50c435ab5931b1b59481e0405d58eab6de68a10d4b55b0f"
+        },
+        {
+          "file": "sample_001_michel_lyso_hits.parquet",
+          "rows": 280,
+          "columns": 14,
+          "sha256": "09dd162a8798bc71fe761a2c74efe22e8922916970729e5350a445c0494a531b"
+        },
+        {
+          "file": "sample_001_michel_slices.parquet",
+          "rows": 44,
+          "columns": 28,
+          "sha256": "0279a8b9c4f67d43651f6daa60cbfa279c521201fc375db0dd061e16b0ba620e"
+        }
+      ],
+      "device": "cpu",
+      "source_mount": "Only purity_release mounted as /release; working directory /tmp; original repository not mounted.",
+      "runtime": "provenance/environment.json"
+    },
+    {
+      "family": "tail",
+      "status": "passed",
+      "configuration": {
+        "schema_version": 1,
+        "model": "tail",
+        "model_class": "PURITYTailModel",
+        "checkpoint": "checkpoints/PURITY_TAIL10_epoch10.pth",
+        "checkpoint_sha256": "6ed827b9707f7f5a4b35dabba8117d95a0766309baded74632ebaae654d651ce",
+        "model_kwargs": {
+          "dropout": 0.05
+        },
+        "environment": {},
+        "inference": {
+          "mode": "train",
+          "batch_size": 128,
+          "max_hits": 250,
+          "mc_passes": 1,
+          "seed": 0
+        },
+        "provenance": "provenance/tail_artifacts.json"
+      },
+      "input_rows": 32,
+      "output_tables": [
+        {
+          "file": "predictions.parquet",
+          "rows": 32,
+          "columns": 32,
+          "sha256": "3ce3782d11c5b5171b967f6c0d38a8851207e7c53bc1cacf10bb028eaabc5641"
+        }
+      ],
+      "device": "cpu",
+      "source_mount": "Only purity_release mounted as /release; working directory /tmp; original repository not mounted.",
+      "runtime": "provenance/environment.json"
+    }
+  ],
+  "final_runner_checks": {
+    "main": {
+      "status": "complete",
+      "output_event_rows": {
+        "sample_000_pie_events.parquet": 2
+      },
+      "error": null,
+      "runner_sha256": "ecfbfda214e4af43c832351441a8b9ea08691bedeae71b8410126593bad35f7d"
+    },
+    "tail": {
+      "status": "complete",
+      "output_event_rows": {
+        "predictions.parquet": 2
+      },
+      "error": null,
+      "runner_sha256": "ecfbfda214e4af43c832351441a8b9ea08691bedeae71b8410126593bad35f7d"
+    },
+    "empty_run": {
+      "status": "failed",
+      "output_event_rows": null,
+      "error": "ValueError: No events survived the input selection; no predictions were written",
+      "runner_sha256": "ecfbfda214e4af43c832351441a8b9ea08691bedeae71b8410126593bad35f7d"
+    }
+  },
+  "tail_dropout_note": "Constructor p=0.05; original PieTaggerHead transformer retains hardcoded p=0.1. Forward parity covers the original behavior."
+}

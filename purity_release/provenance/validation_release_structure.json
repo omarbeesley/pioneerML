@@ -1,0 +1,11 @@
+{
+  "status": "passed",
+  "python_files_parsed": 113,
+  "json_files_parsed": 53,
+  "documentation_links_valid": true,
+  "all_files_including_checkpoints_visible_to_git": true,
+  "unexpected_ignored_files": [],
+  "errors": [],
+  "standalone_validation": "provenance/validation_standalone.json",
+  "note": "Historical migration comparisons are retained as provenance reports; executable old-checkout comparison tests have been removed."
+}

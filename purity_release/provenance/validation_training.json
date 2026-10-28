@@ -1,0 +1,77 @@
+{
+ "schema_version": 1,
+ "status": "passed",
+ "checked_utc": "2026-10-28",
+ "scope": "Bounded CPU checks of the release trainers and training-data commands in pytorch.sif. Small inputs cut from the archived pools; checks code paths, checkpoint compatibility and recorded settings, not training quality.",
+ "slurm_job": 2286282,
+ "runtime": "compute partition, 8 threads, CPU",
+ "checks": {
+  "main_from_scratch": "one stage-2 epoch on 2000 events; validation loss 5.3594, equal to the earlier run 2286274",
+  "main_phase1_override": "checkpoint task_weights.w_angle_decorr = 0.5",
+  "main_resume_released_epoch19": "resumed epoch 19, global_step 189767, no missing or unexpected keys; one more epoch, validation loss -0.0316",
+  "tail_from_scratch_single_file": "one epoch on 300 events (single-file mode, previously broken: no DataLoader built)",
+  "tail_resume_TAIL10_epoch10": "421/421 tensors loaded, none re-initialised; one more epoch",
+  "tail_shard_rotation": "6 shards x 300 events, 2 epochs: corrected loader printed 'train events:' 3 times, --historical_tail10_loader once, matching the TAIL10 log pattern",
+  "parameter_structure_vs_released_checkpoints": {
+   "main": {
+    "same_keys_and_shapes": true,
+    "n_tensors": 392,
+    "epoch": 1,
+    "has_provenance": true,
+    "environment": {
+     "PURITY_GATE_MODE": "best_xy",
+     "PURITY_BEST_XY_BETA": "0.5",
+     "PURITY_ROLE_FILM": "1",
+     "PURITY_ENERGY_TIME_GATE_NS": "0"
+    },
+    "w_angle_decorr": 0.05
+   },
+   "main_resumed": {
+    "same_keys_and_shapes": true,
+    "n_tensors": 392,
+    "epoch": 20,
+    "has_provenance": true,
+    "environment": {
+     "PURITY_GATE_MODE": "best_xy",
+     "PURITY_BEST_XY_BETA": "0.5",
+     "PURITY_ROLE_FILM": "1",
+     "PURITY_ENERGY_TIME_GATE_NS": "0"
+    },
+    "w_angle_decorr": 0.05
+   },
+   "tail": {
+    "same_keys_and_shapes": true,
+    "n_tensors": 421,
+    "epoch": 1,
+    "has_provenance": true,
+    "environment": null,
+    "w_angle_decorr": null
+   },
+   "tail_resumed": {
+    "same_keys_and_shapes": true,
+    "n_tensors": 421,
+    "epoch": 11,
+    "has_provenance": true,
+    "environment": null,
+    "w_angle_decorr": null
+   },
+   "phase1_w_angle_decorr": 0.5
+  },
+  "mix_tail_shard": "300-event mixed shard from generation groups 0, then origin_reslice",
+  "generate_benchmarks_training_recipe": "500 events with TRAIN_VAL_OPTS from unmixed_split, then origin_reslice",
+  "concat_clean": "two shards joined, 1000/1000 kept",
+  "dataset_loads_mixed_outputs": true
+ },
+ "fixes_found": [
+  "training.tail: the source trainer built no DataLoader in single-file mode and crashed on the first batch; fixed. TAIL10 used the shard template and never reached it.",
+  "training.main / training.tail: a training crash or missing input printed an error and exited 0; both now exit 1 so SLURM afterok chains stop."
+ ],
+ "environment_issue": "Intermittent 'Illegal instruction' (SIGILL, exit 132) killed CPU training steps at the first batch on n4140, n4110 and n6110, on steps that passed on the same nodes in other runs. Not reproducible per node or step. The final run retried one step once on that signal and it then passed. GPU node g3200 was unavailable (stale gres allocation). Historical training ran on g3200.",
+ "failed_attempts_logs": [
+  "outputs/smoke_training_20261028/smoke_2286274_failed_cp.log (test-script path bug)",
+  "smoke_2286277_tail_loader_bug.log",
+  "smoke_2286279_illegal_instruction_n4140.log",
+  "smoke_2286280_illegal_instruction_n4110.log"
+ ],
+ "not_performed": "No full-length training run; no comparison of a retrained model's performance with the selected checkpoints."
+}

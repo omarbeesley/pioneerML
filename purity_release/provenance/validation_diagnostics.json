@@ -1,0 +1,63 @@
+{
+  "status": "passed",
+  "checks": [
+    "Exact original/exported ROC and binned-score numerical parity on 1000 controlled events",
+    "All 12 extracted analysis function ASTs preserved, apart from labels and local torch imports",
+    "Historical cut-sweep and cutflow numerical helper ASTs match the original"
+  ],
+  "isolated_container_cli": {
+    "benchmark_plots": {
+      "status": "passed",
+      "png_files": 31,
+      "input": "32 saved example events (16 signal/16 Michel); not a performance sample"
+    },
+    "tail_scores": {
+      "status": "passed",
+      "png_files": 8,
+      "input": "32 saved example events (16 signal/16 Michel); not a performance sample"
+    },
+    "cut_sweep": {
+      "status": "passed",
+      "png_files": 3,
+      "input": "32 saved example events (16 signal/16 Michel); not a performance sample"
+    }
+  },
+  "runtime": "provenance/environment.json",
+  "full_dataset_recomputed": false,
+  "source_sha256": {
+    "__init__.py": "70919aa45f9c73d48395e409ea7bbcd176f8f02c6687037934e48bf33eb7fabd",
+    "_runtime.py": "9fb75bfc9ba5ce090ea9152bc2b65121289662c1e7e90d2abf3d038e592d847b",
+    "benchmark_plots.py": "dbdd77821a7dd81d3570548697c745fce2ae51b352fb8684c3f3e7a4351753de",
+    "cut_sweep.py": "a80eea2fc00f9182211d68543a84f660cb6b5f1609af002ea9feefce3bcb9773",
+    "historical_cutflow.py": "81a12b414aeadc530b058e39b8c47b075ab98d970720f8401a32b0c47e60a197",
+    "per_head_tables.py": "5f0b72bc00cfbd24737a6b6545e65c68f0c12513ce39279a3b957cebc408a30c",
+    "counting.py": "b65baba07137f62e7b087ab753dc6ee6714ec842b43f22c3bee8e19fb5150987",
+    "counting_bias.py": "03d6934a4884387a92007d4687c96114b93edbaf09bb195a58c41037c2c79a26",
+    "event_display.py": "6c16997bcfca956c6ab053a5d6cbe2c1e426eddf9cc54b471751bf3cacea2cb0",
+    "_tail_score_functions.py": "74c97905b59bd39af1953f245bdf864e52d9a566934de6b4812df66e87ead633",
+    "_tail_score_render.py": "d2270ac699ac6603b4f6741036fd7bc9f0a0686a0dd0a32540b08936b553c630",
+    "tail_scores.py": "5b799b3e7cf2e03316ced99c2c989173772bc0f820ea8302487260ee79e0ad7a"
+  },
+  "additional_isolated_cli_checks": {
+    "per_head_tables": {
+      "returncode": 0,
+      "scope": "Previously generated 16 signal + 16 Michel example events; event display uses 2 raw events."
+    },
+    "historical_cutflow": {
+      "returncode": 0,
+      "scope": "Previously generated 16 signal + 16 Michel example events; event display uses 2 raw events."
+    },
+    "event_display": {
+      "returncode": 0,
+      "scope": "Previously generated 16 signal + 16 Michel example events; event display uses 2 raw events."
+    },
+    "counting": {
+      "returncode": 0,
+      "scope": "Previously generated 16 signal + 16 Michel example events; event display uses 2 raw events."
+    },
+    "counting_bias": {
+      "returncode": 0,
+      "scope": "Previously generated 16 signal + 16 Michel example events; event display uses 2 raw events."
+    }
+  }
+}

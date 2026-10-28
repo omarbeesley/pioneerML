@@ -1,0 +1,185 @@
+{
+ "schema_version": 1,
+ "audited_on": "2026-09-10",
+ "selected_model": {
+  "run": "PURITY_TAIL10",
+  "epoch": 10,
+  "training_completed_local_date": "2026-07-06",
+  "train_loss": 0.698593,
+  "validation_loss": 0.72812,
+  "selection_evidence": "Explicitly selected by tail_drop_pie.sbatch, tail_drop_michel_inwin.sbatch and central_cache_drop.sbatch; loss history also has minimum validation loss at epoch 10."
+ },
+ "inference_provenance": {
+  "mode": "train",
+  "dropout": 0.05,
+  "historical_batch_size": {
+   "pie": 128,
+   "michel": 128,
+   "central_dif": 400
+  },
+  "historical_random_seed": null,
+  "release_random_seed": 0,
+  "seed_note": "Release seed is newly fixed and cannot replay the historical dropout realization."
+ },
+ "training_provenance": {
+  "intended_training_shards": 45,
+  "rows_per_shard": 200000,
+  "historically_reused_shards": [
+   "train_000_osl.parquet",
+   "train_001_osl.parquet",
+   "train_002_osl.parquet",
+   "train_003_osl.parquet",
+   "train_004_osl.parquet"
+  ],
+  "historical_loaded_events_after_dataset_filtering": 997380,
+  "epochs": 10,
+  "validation_shard": "val_0_osl.parquet",
+  "post_training_change": "Current external train_tail10.py rebuilds the DataLoader in each epoch. Its lines 524-532 document that the selected checkpoint instead reused the original first-five-shard loader for all ten epochs. Current trainer file mtime is after checkpoint creation.",
+  "claimed_bitwise_retrain_reproduction": false
+ },
+ "historical_analysis_inputs": {
+  "pie_tail": "norad_eval2_drop/ev_*/predictions.parquet",
+  "pie_main": "purity_eval/filmg2_ep19tg_pie/shard_*/pie_eval_events.parquet",
+  "michel_tail": "michel_eval_inwin_drop/*/predictions.parquet",
+  "michel_main": "purity_eval/filmg2_ep19_michel_inwin/*/mic_events.parquet",
+  "michel_overlap_masks": "michel_inwin_leakmask/*.parquet",
+  "dif_tail": "tail_reveal_eval10/predictions_drop.parquet",
+  "pidif_main": "purity_eval/tail_osl/pidif_osl_events.parquet",
+  "mudif_main": "purity_eval/tail_osl/mudif_osl_events.parquet",
+  "dif_main_checkpoint": "main_hybridv2_nodrop_epoch12.pth",
+  "external_root": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline",
+  "join_method": "Positional joins resynchronized by float32 live-energy equality; original caches do not carry a robust shared event identifier."
+ },
+ "limitations": [
+  "Source files and launch recipes are audited current files, not immutable training-time snapshots.",
+  "Historical inference enabled dropout and did not record a random seed.",
+  "Truth-origin reslicing is part of the historical simulation preprocessing.",
+  "The final analysis excludes source-overlap Michel triggers using externally stored masks.",
+  "No training dataset or historical prediction cache is bundled by this manifest."
+ ],
+ "artifacts": [
+  {
+   "source_path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/model_weights/PURITY_TAIL10_epoch10.pth",
+   "role": "Selected thesis tail checkpoint",
+   "sha256": "6ed827b9707f7f5a4b35dabba8117d95a0766309baded74632ebaae654d651ce",
+   "bytes": 86898551,
+   "mtime_utc": "2026-07-06T15:50:54.223491+00:00"
+  },
+  {
+   "source_path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/model_weights/PURITY_TAIL10_loss_history.txt",
+   "role": "Epoch history: epoch 10 is also best validation loss",
+   "sha256": "14d23e101627719ac17b01fb78cf1a36bdfc1f7cabc4cddfe94057529be1608e",
+   "bytes": 227,
+   "mtime_utc": "2026-07-06T15:50:22.369888+00:00"
+  },
+  {
+   "source_path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/train_tail10.py",
+   "role": "Current external trainer; corrected after selected checkpoint was trained",
+   "sha256": "5145b33c85201688bc4aff73c48a8509261f8febcd25b7a22aa7a89448b64885",
+   "bytes": 31595,
+   "mtime_utc": "2026-08-07T00:44:30.394883+00:00"
+  },
+  {
+   "source_path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/train_tail10.sbatch",
+   "role": "Historical training launch recipe",
+   "sha256": "0b94fca21d501f465cd389eb3d3ff568576ea35fe52981cdcd785b6507351bb8",
+   "bytes": 828,
+   "mtime_utc": "2026-07-06T04:14:35.687392+00:00"
+  },
+  {
+   "source_path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10_chain.sbatch",
+   "role": "Training/validation/evaluation generation source-group recipe",
+   "sha256": "64cf418e3b172be2cb941114ce15d6951445c2cd890579aed0de4c3698066ce0",
+   "bytes": 1649,
+   "mtime_utc": "2026-07-06T02:52:55.207042+00:00"
+  },
+  {
+   "source_path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/mix_shard_tail.py",
+   "role": "Historical tail mixture recipe",
+   "sha256": "183d66e0b637ea04d12bd7ca35f62fed0a32eede7848255d227e8fe9d353baa0",
+   "bytes": 2420,
+   "mtime_utc": "2026-07-06T02:52:55.204042+00:00"
+  },
+  {
+   "source_path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/origin_reslice.py",
+   "role": "Truth-origin-dependent ATAR reslicing used for tail10",
+   "sha256": "8dae219873820eefc580a2e0e6c0085b101a4e3e479bc9dbbe707573972d484e",
+   "bytes": 1301,
+   "mtime_utc": "2026-07-04T23:13:45.161177+00:00"
+  },
+  {
+   "source_path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail_drop_pie.sbatch",
+   "role": "Thesis signal inference launch",
+   "sha256": "4a94b04eea46c7a84aa772a8a2ccdfcd856493436226dbed4bea44ec8bc626c7",
+   "bytes": 1267,
+   "mtime_utc": "2026-07-31T07:02:18.560753+00:00"
+  },
+  {
+   "source_path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail_drop_michel_inwin.sbatch",
+   "role": "Thesis Michel inference launch",
+   "sha256": "f2e13f6f3ba07026fecacbc3380fdcd962ac638d05e207bdc86cd6dbc21315ca",
+   "bytes": 1495,
+   "mtime_utc": "2026-07-31T07:01:55.482566+00:00"
+  },
+  {
+   "source_path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/central_cache_drop.sbatch",
+   "role": "Thesis central DIF cache inference launch",
+   "sha256": "186cf6b316215c587d5730fe1cc5ac43974f15ece7cd4b69c23216576b91c936",
+   "bytes": 2001,
+   "mtime_utc": "2026-08-03T02:11:53.109788+00:00"
+  },
+  {
+   "source_path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/eval_main_tailosl.sbatch",
+   "role": "Earlier main reconstruction checkpoint used for central DIF samples",
+   "sha256": "615b405aed1359155c74111af3b45360c2579be63256f01026f556839bb7e9f5",
+   "bytes": 1691,
+   "mtime_utc": "2026-07-29T07:56:00.120648+00:00"
+  },
+  {
+   "source_path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/michel_leak_audit.py",
+   "role": "Source-overlap exclusion mask producer",
+   "sha256": "f9213837a7224eb9a150724611ddec8f1f5257c045200d75c8458cd0d5369394",
+   "bytes": 6529,
+   "mtime_utc": "2026-08-04T21:37:41.283023+00:00"
+  },
+  {
+   "source_path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/logs/taildroppie_1712222_0.log",
+   "role": "Successful exact checkpoint load and active-dropout evidence",
+   "sha256": "e88d78e735ec6be6a7aeb80b53c176d040e7840baea73be6dc6bd00b516b558d",
+   "bytes": 158372,
+   "mtime_utc": "2026-07-31T12:03:50.643052+00:00"
+  },
+  {
+   "source_path": "/home/obeesley/pioneerML/unified_reco/models_tail.py",
+   "role": "Audited tail architecture source",
+   "sha256": "f6634033050427424404ebf9601377ee822ac3ac9a71c185dcdd2b6aae85f73a",
+   "bytes": 82838,
+   "mtime_utc": "2026-06-06T17:56:49.982028+00:00"
+  },
+  {
+   "source_path": "/home/obeesley/pioneerML/unified_reco/tail_reveal_cache.py",
+   "role": "Final reconstructed tail analysis joins and cut selections",
+   "sha256": "bbd17d12f43e44afeb5df85b8e821f0a8d579e6f6b2a77efb06d70f822d77465",
+   "bytes": 12649,
+   "mtime_utc": "2026-08-06T00:03:43.345620+00:00"
+  },
+  {
+   "source_path": "/home/obeesley/pioneerML/unified_reco/tail_rates.py",
+   "role": "Analysis rates and physical-tail rescale convention",
+   "sha256": "9be1066cd8257b0dfc972852636e36a4a0c766e3fcd56ec8edb5456273695506",
+   "bytes": 3123,
+   "mtime_utc": "2026-08-06T00:03:43.242616+00:00"
+  }
+ ],
+ "release_checkpoint": {
+  "file": "checkpoints/PURITY_TAIL10_epoch10.pth",
+  "sha256": "7015da10b6c0d53f7a8ab94034a331ded3cbd4baca278b982e4e907f86a555ec",
+  "bytes": 29673103,
+  "content": "weights-only copy of the original training checkpoint: optimizer and scheduler state removed; model tensors and metadata identical",
+  "original": {
+   "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/model_weights/PURITY_TAIL10_epoch10.pth",
+   "sha256": "6ed827b9707f7f5a4b35dabba8117d95a0766309baded74632ebaae654d651ce"
+  },
+  "validation": "provenance/validation_weights_only.json"
+ }
+}

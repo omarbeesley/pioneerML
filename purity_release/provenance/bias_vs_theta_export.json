@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "source": "unified_reco/bias_vs_theta.py",
+  "source_sha256": "0059f4b0e2b49618b06adba0710ac98c0945dcc7b13668c4ba337ae09e5a8fba",
+  "source_lines": 97,
+  "export": "src/purity/final_analysis/tail/bias_vs_theta.py",
+  "export_sha256": "a6100cc46d0e96d186fc173a981e67746cf5eac9dcb9a71fb5fff7a83f43904d",
+  "coverage": "Complete completed original plotting entry point",
+  "direct_local_dependencies": [
+    {
+      "path": "src/purity/final_analysis/tail/_runtime.py",
+      "sha256": "71fc4bf742b742d0b5723d06ea5c8d774d4efa39108ef42f7b2480bf6d2384c7"
+    }
+  ],
+  "historical_version": {
+    "input": "User-supplied eval_tail prediction file. Original default pointed to tail_reveal_eval_pidif/predictions.parquet and did not identify a checkpoint. Validation explicitly selects central predictions_drop, not a claim about that original default.",
+    "calculation": "Per-bin quantile veto, efficiency(tail)/efficiency(peak), propagated binomial errors. Exact original bias_in_bins function.",
+    "defaults": {
+      "pie_eff": 0.5,
+      "e_split": 56.0,
+      "e_max": 75.0,
+      "accept_min": 0.5,
+      "angle_max": 120.0,
+      "theta_edges": [
+        0,
+        50,
+        70,
+        85,
+        100,
+        120
+      ]
+    },
+    "acceptance": "muDIF uses full acceptance>=.5; piDIF uses theta<120 only. E=deposited_energy+dead_E <=75, no lower bound. Require >=10 tail and >=50 peak events in each bin; strict score<threshold.",
+    "layout": "One8\u00d75in axis, muDIF and piDIF ratio curves and error bars, unbiased reference1.0.",
+    "output_stem": "bias_vs_theta",
+    "distinct_from": "fig10_mudif_angular.py / angular.py displays suppression, removed signal and original tail fraction in3panels; it does not plot this per-angle-bin bias ratio."
+  },
+  "operational_changes": [
+    "Explicit --pred and --output-dir replace private relative defaults.",
+    "Main guard retained; imports do not load data.",
+    "Fresh output required and run/input/source record added.",
+    "Require populated input and at least one valid curve, otherwise fail rather than write blank plot.",
+    "Keep PNG and additionally write PDF and numeric JSON."
+  ],
+  "validation": {
+    "path": "provenance/validation_bias_vs_theta.json",
+    "sha256": "e65a0113b029317dcff33ab277931bb11d7e9195e7e95465b987fbb3c7445257"
+  },
+  "bundled_data": "No extra input cohorts or generated plots bundled by this export."
+}

@@ -1,0 +1,130 @@
+{
+  "schema_version": 1,
+  "status": "passed",
+  "checked_utc": "2026-09-10T19:14:53.856103+00:00",
+  "module": "purity.final_analysis.tail.bias_vs_theta",
+  "validation": {
+    "parse": "passed",
+    "import": "passed",
+    "help": "passed",
+    "export_sha256": "a6100cc46d0e96d186fc173a981e67746cf5eac9dcb9a71fb5fff7a83f43904d",
+    "reference_parity": {
+      "function_ast": "exact",
+      "numerical_values": "exact",
+      "rows": 598528,
+      "heads": {
+        "muDIF": {
+          "populated_bins": 5,
+          "theta": [
+            25.0,
+            60.0,
+            77.5,
+            92.5,
+            110.0
+          ],
+          "ratio": [
+            1.143284778832019,
+            0.9743589743589743,
+            0.9795918367346939,
+            0.6836839404822986,
+            1.0934642577327809
+          ],
+          "uncertainty": [
+            0.13254042464280635,
+            0.16024190276209221,
+            0.14304423469821095,
+            0.1538993256385328,
+            0.1076889814560808
+          ],
+          "tail_events": [
+            56,
+            39,
+            49,
+            38,
+            86
+          ]
+        },
+        "piDIF": {
+          "populated_bins": 5,
+          "theta": [
+            25.0,
+            60.0,
+            77.5,
+            92.5,
+            110.0
+          ],
+          "ratio": [
+            1.1566844844431083,
+            0.7107265881598975,
+            1.031410948392467,
+            0.5951903278601974,
+            1.02012383650344
+          ],
+          "uncertainty": [
+            0.12371452004349605,
+            0.14271774746641838,
+            0.12517973465882107,
+            0.13335932712455845,
+            0.10020253036075642
+          ],
+          "tail_events": [
+            64,
+            45,
+            64,
+            47,
+            100
+          ]
+        }
+      }
+    },
+    "render": {
+      "returncode": 0,
+      "log": "muDIF:\n   theta~ 25.0 deg   bias=1.143 +/- 0.133   (tail N=56)\n   theta~ 60.0 deg   bias=0.974 +/- 0.160   (tail N=39)\n   theta~ 77.5 deg   bias=0.980 +/- 0.143   (tail N=49)\n   theta~ 92.5 deg   bias=0.684 +/- 0.154   (tail N=38)\n   theta~110.0 deg   bias=1.093 +/- 0.108   (tail N=86)\npiDIF:\n   theta~ 25.0 deg   bias=1.157 +/- 0.124   (tail N=64)\n   theta~ 60.0 deg   bias=0.711 +/- 0.143   (tail N=45)\n   theta~ 77.5 deg   bias=1.031 +/- 0.125   (tail N=64)\n   theta~ 92.5 deg   bias=0.595 +/- 0.133   (tail N=47)\n   theta~110.0 deg   bias=1.020 +/- 0.100   (tail N=100)\n\nwrote /work/bias_vs_theta/bias_vs_theta.png\n",
+      "outputs": [
+        {
+          "file": "bias_vs_theta.json",
+          "bytes": 1337,
+          "sha256": "468fadec13572fe5d17cad2a42556b0c02e710f697cadfee86ef2b9d23c5cd3a"
+        },
+        {
+          "file": "bias_vs_theta.pdf",
+          "bytes": 18341,
+          "sha256": "13ef90d39e01a43ad2ef48c4a28cf5d1ba01717b5c82563fdfc26a4d218e513d"
+        },
+        {
+          "file": "bias_vs_theta.png",
+          "bytes": 80766,
+          "sha256": "adeca1b450aab7c8ad1fac67b3cd89c7ca6d46a22ed0ff34c8da1845a340f6d8"
+        },
+        {
+          "file": "bias_vs_theta.run.json",
+          "bytes": 2849,
+          "sha256": "a464c6e949f63be669e2ee8d6028a2296d8e554aefa75ca66584e125517726ca"
+        }
+      ]
+    },
+    "nonempty_output_guard": "passed"
+  },
+  "input_extractions": [
+    {
+      "original": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail_reveal_eval10/predictions_drop.parquet",
+      "original_bytes": 57849221,
+      "original_sha256": "64cb807de0ae2a7d5e4c89ff4793810f76f4574c3784d96fa9d6482642040816",
+      "columns": [
+        "deposited_energy",
+        "dead_E",
+        "positron_theta",
+        "acceptance",
+        "is_pie",
+        "muon_dif_score",
+        "pion_dif_score"
+      ],
+      "selection": "all rows",
+      "rows": 598528,
+      "export": "angle_predictions.parquet",
+      "export_sha256": "77a29060b050d914805e09f27bb84e55500ab8eff440251482ed5978259a30ac"
+    }
+  ],
+  "environment": "Production pytorch.sif container, Python3.11, release-only mount plus actual input extracts and reference text used only by validation harness.",
+  "scope": "Angle estimator: all598528 rows of actual central predictions_drop. Standalone tradeoff: first100000 raw historical signal rows, all central plain predictions (149459 muDIF rows before selection). Numerical parity is exact on supplied inputs; bounded tradeoff is not the full historical rate."
+}

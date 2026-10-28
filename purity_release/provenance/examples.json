@@ -1,0 +1,22 @@
+[
+  {
+    "file": "examples/pie.parquet",
+    "sha256": "57f86351a2349646901074a3c32306647ada9fce750fec22b40a2411492467ff",
+    "rows": 16,
+    "source": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/norad_flat_rs/mix_00/data.parquet",
+    "source_rows": 266716,
+    "source_bytes": 1290123028,
+    "selection": "first 16 raw rows, before the runtime hit-count filter; fl2 production input; simulation-origin resliced",
+    "use": "Plumbing check only, not a representative performance sample."
+  },
+  {
+    "file": "examples/michel.parquet",
+    "sha256": "c480ec6a947ed23a56c15d8a86d4a126ee87d1a1bf9b0a8f2de8debe999142c0",
+    "rows": 16,
+    "source": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/michel_flat2_rs/mix_000/data.parquet",
+    "source_rows": 259274,
+    "source_bytes": 880110967,
+    "selection": "first 16 raw rows, before the runtime hit-count filter; fl2 production input; simulation-origin resliced",
+    "use": "Plumbing check only, not a representative performance sample."
+  }
+]

@@ -1,0 +1,253 @@
+{
+ "schema_version": 1,
+ "date": "2026-10-28",
+ "summary": [
+  "Added trainers of both selected checkpoints (src/purity/training/) and SLURM launchers for training and training-data mixing (scripts/slurm/).",
+  "Added training-data commands mix_tail_shard and concat_clean.",
+  "Added the Table 20 assembly command (final_analysis.reconstruction.table20).",
+  "pion_stop_radial writes frac_gt_250um and fig3b_hist.npz and redraws Figure 94 from cache; chain_failure redraws Figure 96 from cache.",
+  "Ported fig9_tail_survivor_displays.py as final_analysis.tail.survivor_displays.",
+  "Rebuilt tail_reveal_cache.npz and tail_stats.json from the frozen inputs; bundled with fig3b_hist.npz.",
+  "Stable event key (source_file, source_row) in main events and tail predictions.",
+  "verify_release.py also fails on files missing from the manifest."
+ ],
+ "modified": {
+  "README.md": {
+   "before": "d4db05422c7b1f593e0efbf72d4a4fec9e0a6d8213eee20be0eaa09b652e0f69",
+   "after": "f5984ab43eb04b22400e8dd7d515b9583491d885f55b533fea423023ea4264ae"
+  },
+  "docs/data_contract.md": {
+   "before": "1f72f6ff6519f79dc1c86f9ae0eecd41d05cced3ad647c6fc3469341bbb122f5",
+   "after": "14cda1d3e1d9fc051fee8f34779ab2c9f31b85e370364de2d35413524908b01c"
+  },
+  "docs/main_model.md": {
+   "before": "98fccbd2ee75cd492ca9824af33cf41e6194143df51714e6b41fabe4f7176dbd",
+   "after": "1e1f28a3ee980fc0b28bdd1a9d358e919bb23d9b84c1aeb0ff30a6916f94223a"
+  },
+  "docs/reconstruction_analysis.md": {
+   "before": "516f88002769f788a4987fe77c74247437fb15cf2197d49005b180eebf98660e",
+   "after": "660e58b54523c55d6c8c7ca7ddfaba64f2bc6e2fdfb0c592d00d58fe80c8b578"
+  },
+  "docs/reproduction.md": {
+   "before": "585f71464d68bea87f607aa1c77e33a4145258a503b952e0d03edffd7be0c9b6",
+   "after": "ca56df6a94867a7f19b32aadc7397bb6f8eb9aa03edee05e131344c3a511ebcd"
+  },
+  "docs/requested_tail_plots.md": {
+   "before": "bac9f10f17d5d472ffddc82654c50c80c6b3732bc3922a4ea21b08eeb40243ee",
+   "after": "2d89af6d68772205122258294b83909567066b2a1ed91bf30046122b66bc0b0d"
+  },
+  "docs/tail_analysis.md": {
+   "before": "40b6d8e3a46b40442d58e7660a685b1ed741d01cc53f3d95df998cd6be21604b",
+   "after": "b66bef7313634c525dde981dae168c5e3c702921759b69bb5a589b71fae043b8"
+  },
+  "docs/tail_model.md": {
+   "before": "14b11101fc7e9e65686f5cb931b30c903446910a1da44d39e868e9400fc9764e",
+   "after": "c2df157be2b2ea7f2c2187839c938c2ca0614cffa3357d79c23346a9f9d290a8"
+  },
+  "docs/thesis.md": {
+   "before": "c30e85069606426e32b124a621fd818a32a0ae07b7f40f43761eb5933d0dcc29",
+   "after": "a937a5d88a8bbe7c34148b5c8be60c8b4f0f2fe2315a858a515e9fcb2d92170d"
+  },
+  "references/tail/README.md": {
+   "before": "51137e4e4f78f7823b5efb033ae9583d406fcaff7cd8874115516e1f5c3509c6",
+   "after": "bbe9526e6172fc36bb7512b38f75ba185ed9ec40984320c6715749396ccb8bfb"
+  },
+  "scripts/verify_release.py": {
+   "before": "860d2dd60f559b496e8339898ffd791d2caf095e71e89274b8d2c8ffc7be7abc",
+   "after": "947783d054271b0caf9608fa48c82cb5c63016c812701aa583affc9010898cc4"
+  },
+  "src/purity/benchmark.py": {
+   "before": "1d54bf411fabadb5021df9046fed293d3cac69506d1a54bb28132ad5b2e75c3e",
+   "after": "5d677a7a7a2a292934b8b8e6684a69a099b00ee49ba2e3d07b407e9b8fcc6ca6"
+  },
+  "src/purity/dataset.py": {
+   "before": "002c8821909635de023bc82cffe0d76ce0b1316427332396b158d1303798084b",
+   "after": "e7e9d6b19aec8c6df5b90bc737fc0766941e6b110c083a9c4299b93607826517"
+  },
+  "src/purity/eval_tail.py": {
+   "before": "84432e56d8cfe84bb85c32da881afa05fd15b44bce2846820acbecc056ff10c1",
+   "after": "5d675ce3ea05a53f3cb1796e19ecb623c11b8123d9e6669b3d7a01a6aa94ce87"
+  },
+  "src/purity/final_analysis/reconstruction/_shared.py": {
+   "before": "f7829d8c91d8ecb49f57c6bc7e42877e1bacd6357bd4e4b0bf354f9383b55971",
+   "after": "681e1f3db7eccce09133eaac731d29c3d9f1662a0722e39ff2fc403cf64ad382"
+  },
+  "src/purity/final_analysis/reconstruction/chain_failure.py": {
+   "before": "e35a49a9cca208c698e73d091fcef146218ad64fcebee31cc04b6d541a7c1fd1",
+   "after": "05ca84e47b895dbddf6b92d6c3160ff9a1b2e8254b727fbf3138b36170e1b98f"
+  },
+  "src/purity/final_analysis/reconstruction/pion_stop_radial.py": {
+   "before": "e4eb01b285866c72e121158886c6d07129998add9f1af362b5fe3024a3804042",
+   "after": "f08e95561fcb5bbfacfc3918875c2a4b133db066727e2be82593e40a86b6d553"
+  },
+  "src/purity/final_analysis/tail/_runtime.py": {
+   "before": "71fc4bf742b742d0b5723d06ea5c8d774d4efa39108ef42f7b2480bf6d2384c7",
+   "after": "deedea403f3057617f2084bfcf9b1bebed1b9fffb4cec7479b8e99fa917e63a3"
+  }
+ },
+ "added": [
+  "docs/training.md",
+  "provenance/training_artifacts.json",
+  "provenance/validation_gap_closure.json",
+  "provenance/validation_stable_key.json",
+  "provenance/validation_training.json",
+  "references/reconstruction/fig3b_hist.npz",
+  "references/reconstruction/fig3b_hist.run.json",
+  "references/tail/rebuild_20261028/cache.run.json",
+  "references/tail/rebuild_20261028/diagnostics.run.json",
+  "references/tail/rebuild_20261028/mudif.run.json",
+  "references/tail/rebuild_20261028/reconstructed.run.json",
+  "references/tail/rebuild_20261028/survivor_displays.json",
+  "references/tail/rebuild_20261028/survivor_displays.run.json",
+  "references/tail/tail_reveal_cache.npz",
+  "references/tail/tail_stats.json",
+  "scripts/slurm/concat_train_main.sbatch",
+  "scripts/slurm/mix_train_main.sbatch",
+  "scripts/slurm/mix_train_tail.sbatch",
+  "scripts/slurm/train_main.sbatch",
+  "scripts/slurm/train_tail.sbatch",
+  "src/purity/final_analysis/reconstruction/table20.py",
+  "src/purity/final_analysis/tail/survivor_displays.py",
+  "src/purity/preprocessing/concat_clean.py",
+  "src/purity/preprocessing/mix_tail_shard.py",
+  "src/purity/training/__init__.py",
+  "src/purity/training/main.py",
+  "src/purity/training/tail.py"
+ ],
+ "removed": [],
+ "note": "Earlier provenance records (export audits, source_snapshot.json, validation_*.json dated 2026-09-10) describe the release as audited then; their source hashes predate these changes. release_manifest.json is current.",
+ "validation": [
+  "provenance/validation_training.json",
+  "provenance/validation_stable_key.json",
+  "provenance/validation_gap_closure.json"
+ ],
+ "trim": {
+  "summary": "Release trimmed to models, inference and benchmarks, data preparation, training, the R_e/mu analysis (performance, acceptance bias, time fit) and the tail cut chain with its three requested plots. Thesis figure recipes, thesis-specific diagnostics, bundled figure caches and thesis documents were removed; a complete pre-trim snapshot is kept in ../thesis_reproduction/ (verified with its own manifest).",
+  "kept_from_references": [
+   "references/final/perf_fl2.json",
+   "references/final/accbias_final.json"
+  ],
+  "removed": [
+   "docs/diagnostic_supplements.md",
+   "docs/plotting.md",
+   "docs/preparation_plots.md",
+   "docs/reconstruction_analysis.md",
+   "docs/requested_tail_plots.md",
+   "docs/supplementary_plots.md",
+   "docs/thesis.md",
+   "provenance/diagnostic_supplements_export.json",
+   "provenance/preparation_plots_export.json",
+   "provenance/reconstruction_analysis_export.json",
+   "provenance/supplementary_analysis_export.json",
+   "provenance/thesis_checks.json",
+   "provenance/validation_diagnostic_supplements.json",
+   "provenance/validation_gap_closure.json",
+   "provenance/validation_plot_launcher.json",
+   "provenance/validation_preparation_plots.json",
+   "provenance/validation_reconstruction_analysis.json",
+   "provenance/validation_supplementary_analysis.json",
+   "references/preparation/pileup_times.npz",
+   "references/reconstruction/PURITY_TAIL10_loss_history.txt",
+   "references/reconstruction/adv6_denom.json",
+   "references/reconstruction/adv6_denom.npz",
+   "references/reconstruction/adv6_mech.json",
+   "references/reconstruction/fig1_stats.json",
+   "references/reconstruction/fig2_reduce.npz",
+   "references/reconstruction/fig2_stats.json",
+   "references/reconstruction/fig2b_cand_events.parquet",
+   "references/reconstruction/fig2b_cand_hits.parquet",
+   "references/reconstruction/fig3_stats.json",
+   "references/reconstruction/fig3b_hist.npz",
+   "references/reconstruction/fig3b_hist.run.json",
+   "references/reconstruction/fig3b_stats.json",
+   "references/reconstruction/fig4_angres_binned.npz",
+   "references/reconstruction/fig6_numbers.json",
+   "references/reconstruction/fig7_numbers.json",
+   "references/reconstruction/main_hybridv2_filmg2_loss_history.txt",
+   "references/reconstruction/main_hybridv2_filmg_loss_history.txt",
+   "references/reconstruction/qa_planes.json",
+   "references/reconstruction/qa_q3c_evfeat.parquet",
+   "references/supplementary/ct_bench.npz",
+   "references/supplementary/lamscan_backrise.json",
+   "references/supplementary/lamscan_backrise.npz",
+   "references/tail/README.md",
+   "references/tail/angular_predictions.parquet",
+   "references/tail/angular_reference.json",
+   "references/tail/rebuild_20261028/cache.run.json",
+   "references/tail/rebuild_20261028/diagnostics.run.json",
+   "references/tail/rebuild_20261028/mudif.run.json",
+   "references/tail/rebuild_20261028/reconstructed.run.json",
+   "references/tail/rebuild_20261028/survivor_displays.json",
+   "references/tail/rebuild_20261028/survivor_displays.run.json",
+   "references/tail/tail_reveal_cache.npz",
+   "references/tail/tail_stats.json",
+   "scripts/plot_references.py",
+   "src/purity/diagnostics/accidental_tags.py",
+   "src/purity/diagnostics/historical_cutflow.py",
+   "src/purity/diagnostics/mudif_events.py",
+   "src/purity/diagnostics/pie_muonlike.py",
+   "src/purity/diagnostics/tail_survivor_displays.py",
+   "src/purity/final_analysis/reconstruction/__init__.py",
+   "src/purity/final_analysis/reconstruction/_shared.py",
+   "src/purity/final_analysis/reconstruction/angular_resolution.py",
+   "src/purity/final_analysis/reconstruction/backward_anatomy.py",
+   "src/purity/final_analysis/reconstruction/backward_denominator_reduce.py",
+   "src/purity/final_analysis/reconstruction/backward_geometry_reduce.py",
+   "src/purity/final_analysis/reconstruction/backward_mechanism.py",
+   "src/purity/final_analysis/reconstruction/backward_mechanism_reduce.py",
+   "src/purity/final_analysis/reconstruction/benchmark_observables.py",
+   "src/purity/final_analysis/reconstruction/chain_failure.py",
+   "src/purity/final_analysis/reconstruction/energy_spectrum.py",
+   "src/purity/final_analysis/reconstruction/event_display.py",
+   "src/purity/final_analysis/reconstruction/event_features_reduce.py",
+   "src/purity/final_analysis/reconstruction/hit_confusion.py",
+   "src/purity/final_analysis/reconstruction/loss_curves.py",
+   "src/purity/final_analysis/reconstruction/matching_displays.py",
+   "src/purity/final_analysis/reconstruction/misclassification_candidates.py",
+   "src/purity/final_analysis/reconstruction/misclassification_displays.py",
+   "src/purity/final_analysis/reconstruction/pion_stop.py",
+   "src/purity/final_analysis/reconstruction/pion_stop_radial.py",
+   "src/purity/final_analysis/reconstruction/plane_geometry_reduce.py",
+   "src/purity/final_analysis/reconstruction/probability_reduce.py",
+   "src/purity/final_analysis/reconstruction/probability_space.py",
+   "src/purity/final_analysis/reconstruction/table20.py",
+   "src/purity/final_analysis/supplementary/__init__.py",
+   "src/purity/final_analysis/supplementary/_shared.py",
+   "src/purity/final_analysis/supplementary/classical_tracker.py",
+   "src/purity/final_analysis/supplementary/in_situ_angular.py",
+   "src/purity/final_analysis/supplementary/pileup_rate.py",
+   "src/purity/final_analysis/supplementary/pileup_rate_reduce.py",
+   "src/purity/final_analysis/supplementary/tag_features_reduce.py",
+   "src/purity/final_analysis/supplementary/tag_ranking.py",
+   "src/purity/final_analysis/tail/angular.py",
+   "src/purity/final_analysis/tail/beforeafter.py",
+   "src/purity/final_analysis/tail/diagnostics.py",
+   "src/purity/final_analysis/tail/irreducible.py",
+   "src/purity/final_analysis/tail/mudif.py",
+   "src/purity/final_analysis/tail/reconstructed.py",
+   "src/purity/final_analysis/tail/survivor_displays.py",
+   "src/purity/final_analysis/tail/tradeoff.py",
+   "src/purity/preprocessing/_historical_pileup_recorder.py",
+   "src/purity/preprocessing/plot_pileup_times.py",
+   "src/purity/preprocessing/plot_training_mixture.py",
+   "src/purity/preprocessing/record_pileup_times.py"
+  ],
+  "validation": "outputs/trim_validation_20261028 (module --help sweep, standalone check, example workflow, kept tail plots)"
+ },
+ "weights_only_checkpoints": {
+  "summary": "checkpoints/ now hold weights-only copies (optimizer and scheduler state removed) so each file is under GitHub's 100 MB limit; configs pin the new hashes. Tensors, metadata and both models' outputs identical; full originals stay in scratch_pipeline/model_weights/.",
+  "main_hybridv2_filmg2_epoch19.pth": {
+   "before": "89af5f93661aa38e2788530dd94b0a694be5165ab5d9719437a16a9793428f97",
+   "after": "6e9ef16a981b3af186d817ecaa6573ce1c9989a36462ddc6fd0e467b129ee845"
+  },
+  "PURITY_TAIL10_epoch10.pth": {
+   "before": "6ed827b9707f7f5a4b35dabba8117d95a0766309baded74632ebaae654d651ce",
+   "after": "7015da10b6c0d53f7a8ab94034a331ded3cbd4baca278b982e4e907f86a555ec"
+  },
+  "also": [
+   "purity.training.main resumes a checkpoint without optimizer state with a fresh optimizer",
+   ".gitignore excludes bytecode under src/purity/diagnostics"
+  ],
+  "validation": "provenance/validation_weights_only.json"
+ }
+}

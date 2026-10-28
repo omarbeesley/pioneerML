@@ -1,0 +1,67 @@
+{
+  "source_path": "/home/obeesley/pioneerML/figures/talk/fig_cutflow_spectra.py",
+  "source_sha256": "1bfd7c96c93e45fb2c3b9e18a5c30a0f334a9ef24bdc31c492921c0a77461c32",
+  "export_path": "src/purity/final_analysis/tail/fig_cutflow_spectra.py",
+  "export_sha256": "c6b9509aba7998ab8d856df9bce73f2c757bb8c7c8cb3765ea8d261485ac9d94",
+  "scope": "Exact four-across talk cutflow renderer identified from user-supplied image.",
+  "changes": [
+    "Wrapped plotting execution in a callable run function.",
+    "Replaced original source import and absolute paths with local style and explicit cache/output paths.",
+    "Added standard release run provenance and output protection."
+  ],
+  "scientific_and_plotting_body_preserved": true,
+  "input": "tail_reveal_cache.npz",
+  "outputs": [
+    "cutflow_spectra_michel.pdf",
+    "cutflow_spectra_michel.png",
+    "cutflow_spectra_pidif.pdf",
+    "cutflow_spectra_pidif.png",
+    "cutflow_spectra_mudif.pdf",
+    "cutflow_spectra_mudif.png"
+  ],
+  "requested_image_identification": {
+    "layout": "1 row, 4 panels",
+    "titles": [
+      "acceptance",
+      "+ prompt window",
+      "+ pion-to-positron topology",
+      "+ muon vetoes"
+    ],
+    "screenshot_signal_percentages": [
+      100,
+      63.2,
+      31.2,
+      26.7
+    ],
+    "screenshot_michel_percentages": [
+      100,
+      3.5,
+      0.0061,
+      0
+    ],
+    "note": "Percentages are computed from cache counts; they are not hardcoded into the renderer."
+  },
+  "archived_output": {
+    "source_path": "figures/talk/cutflow_spectra_michel.png",
+    "sha256": "12dca257fee96e0e2e92a93825a557f34d6f021fd9ed53d48bbc25b9b09f2bc3",
+    "pixel_dimensions": [
+      2769,
+      763
+    ],
+    "visual_match": "Four horizontal panels and all eight signal/background labels match the supplied image.",
+    "original_cache_available": false
+  },
+  "validation": {
+    "command_help": "passed",
+    "unchanged_ast_nodes": [
+      "BLUE",
+      "ES",
+      "LEGEND",
+      "PANELS",
+      "pct",
+      "PANELS"
+    ],
+    "full_render_repeated": false,
+    "reason": "The archived historical cache is unavailable; original output image was visually matched."
+  }
+}

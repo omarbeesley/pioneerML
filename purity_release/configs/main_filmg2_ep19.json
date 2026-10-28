@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "model": "main",
+  "model_class": "PURITYModel",
+  "checkpoint": "checkpoints/main_hybridv2_filmg2_epoch19.pth",
+  "checkpoint_sha256": "6e9ef16a981b3af186d817ecaa6573ce1c9989a36462ddc6fd0e467b129ee845",
+  "model_kwargs": {
+    "dropout": 0.0
+  },
+  "environment": {
+    "PURITY_GATE_MODE": "best_xy",
+    "PURITY_BEST_XY_BETA": "0.5",
+    "PURITY_ROLE_FILM": "1",
+    "PURITY_ENERGY_TIME_GATE_NS": "5.0",
+    "PURITY_MAX_HITS": "250"
+  },
+  "inference": {
+    "mode": "train",
+    "batch_size": 200,
+    "max_hits": 250,
+    "mc_passes": 1,
+    "seed": 0
+  },
+  "provenance": "provenance/main_artifacts.json"
+}

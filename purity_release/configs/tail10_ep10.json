@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "model": "tail",
+  "model_class": "PURITYTailModel",
+  "checkpoint": "checkpoints/PURITY_TAIL10_epoch10.pth",
+  "checkpoint_sha256": "7015da10b6c0d53f7a8ab94034a331ded3cbd4baca278b982e4e907f86a555ec",
+  "model_kwargs": {
+    "dropout": 0.05
+  },
+  "environment": {},
+  "inference": {
+    "mode": "train",
+    "batch_size": 128,
+    "max_hits": 250,
+    "mc_passes": 1,
+    "seed": 0
+  },
+  "provenance": "provenance/tail_artifacts.json"
+}

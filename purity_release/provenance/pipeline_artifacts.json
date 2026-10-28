@@ -1,0 +1,2530 @@
+{
+  "schema_version": 1,
+  "audited_on": "2026-09-10",
+  "external_pipeline_root": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline",
+  "scope": "Recovered final main-model fl2 analysis recipes and their dependencies; no full-pool rerun performed.",
+  "main_input_production": {
+    "checkpoint": "main_hybridv2_filmg2_epoch19.pth",
+    "variant": "filmg2_ep19fl2",
+    "generation_script": "unified_reco/generate_tail_reveal.py",
+    "pileup_lam": 0.24,
+    "chunk_size": 100000,
+    "radio_rate_hz": 20000000.0,
+    "trigger_gap_ns": 2.0,
+    "drop_radiative_muon_donors": true,
+    "exclude_direct_pie_accidental_donors": true,
+    "michel": {
+      "only": "michel_eval",
+      "window_enforcement": false,
+      "no_replace": true,
+      "seed": "task_id + 9001",
+      "mixed_inputs_retained_tasks": "0 through 19 only"
+    },
+    "pie": {
+      "only": "pie_eval",
+      "window_enforcement": true,
+      "seed": "task_id + 101"
+    },
+    "preparation": "origin_reslice.py groups by original ATAR slice and mixing origin; requires atar_origin simulation bookkeeping",
+    "main_inference_environment": {
+      "PURITY_GATE_MODE": "best_xy",
+      "PURITY_BEST_XY_BETA": "0.5",
+      "PURITY_ROLE_FILM": "1",
+      "PURITY_ENERGY_TIME_GATE_NS": "5.0"
+    },
+    "dropout": 0.0,
+    "model_version": "v2",
+    "default_batch_size": 200,
+    "default_hit_cap": 250
+  },
+  "source_files": {
+    "external": [
+      {
+        "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/perf_fl2.py",
+        "exists": true,
+        "bytes": 3740,
+        "sha256": "f3faaacd9af7f5ca602e7f53e690fb8f04c81ea235047cd7c215085ace15da46"
+      },
+      {
+        "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/accbias_final.py",
+        "exists": true,
+        "bytes": 6792,
+        "sha256": "c6255f109020683f1a611698f3f676c49ca59125bd70f84bb0738cce22357c3f"
+      },
+      {
+        "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/build_fl2_combined.py",
+        "exists": true,
+        "bytes": 2263,
+        "sha256": "7c5ed9309138458c8bd7b4136b90bf549304d29788a137b1a7ef86f8f40b03f1"
+      },
+      {
+        "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/fl2_timefit.sbatch",
+        "exists": true,
+        "bytes": 824,
+        "sha256": "2fd712e7a4683be386ee00badf751266ab7d62bbc010321cb837cbf10c1adde0"
+      },
+      {
+        "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/michel_flat_big2.sbatch",
+        "exists": true,
+        "bytes": 4624,
+        "sha256": "ff7a921d3a599dc2cedd14bc8e7d92a441eda3359b00264f9440e059c0268a1d"
+      },
+      {
+        "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/pie_flat_chain2.sbatch",
+        "exists": true,
+        "bytes": 3081,
+        "sha256": "f0c797c025c7159b9a3e340c93a28e33aebd8d6a70efb013a9b3a070d07e217e"
+      },
+      {
+        "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/michel_shard_concat.py",
+        "exists": true,
+        "bytes": 667,
+        "sha256": "a4caf5a141059f41497fe74f72413c2973e1b6ba066398b7b8a5c830d5b903d9"
+      },
+      {
+        "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/origin_reslice.py",
+        "exists": true,
+        "bytes": 1301,
+        "sha256": "8dae219873820eefc580a2e0e6c0085b101a4e3e479bc9dbbe707573972d484e"
+      },
+      {
+        "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail_final_chain.sbatch",
+        "exists": true,
+        "bytes": 1854,
+        "sha256": "0ee6d0d39fcdd4669e76182e45d877dde6e14efe45cb52b8d06d7c267d23d1cb"
+      },
+      {
+        "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/final_plots/fig5_energy_spectrum_fixed.py",
+        "exists": true,
+        "bytes": 8939,
+        "sha256": "1d5dbad0583949e6fac4d489001c438f9f2f7aa68a8d9adcf462fa230da92063"
+      },
+      {
+        "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/final_plots/fig8_timefit_fixed.py",
+        "exists": true,
+        "bytes": 11779,
+        "sha256": "cea46c8e1cda4738bb44081764fa1ee7756f213e4bf77352d627c5b4c6ad4c26"
+      }
+    ],
+    "original_repository": [
+      {
+        "path": "/home/obeesley/pioneerML/unified_reco/root_to_parquet.py",
+        "exists": true,
+        "bytes": 43448,
+        "sha256": "5146ebfc32c0eb3203a9ca6a9698e9c08a19bf04a557bdd8b28a262e1b3baabd"
+      },
+      {
+        "path": "/home/obeesley/pioneerML/unified_reco/generate_unmixed.py",
+        "exists": true,
+        "bytes": 5385,
+        "sha256": "16f0118c1a74a62e692a923a6ce66432c0796565a6bca55f91c3f24001f778fe"
+      },
+      {
+        "path": "/home/obeesley/pioneerML/unified_reco/generate_benchmarks.py",
+        "exists": true,
+        "bytes": 7544,
+        "sha256": "89a9c5fe3016f4965e3c94b1850f95a329b243836b5e490d76336e838527cc09"
+      },
+      {
+        "path": "/home/obeesley/pioneerML/unified_reco/generate_tail_reveal.py",
+        "exists": true,
+        "bytes": 16735,
+        "sha256": "34d8ed916b39169ec6178368c723ad7e6be81bdcab9e9abef145b4a40a8594ab"
+      },
+      {
+        "path": "/home/obeesley/pioneerML/unified_reco/pileup_mixer.py",
+        "exists": true,
+        "bytes": 52551,
+        "sha256": "14447dd72ad7db604c3cf09c7c190f4aa123712728db809a781b8824c3a2be4a"
+      },
+      {
+        "path": "/home/obeesley/pioneerML/unified_reco/purity_analysis/io.py",
+        "exists": true,
+        "bytes": 8322,
+        "sha256": "2e2c66fb42baa67fa7f111879e3964e83714250ea5f0f9a5d7625b1b5b768b59"
+      },
+      {
+        "path": "/home/obeesley/pioneerML/unified_reco/purity_analysis/measurement.py",
+        "exists": true,
+        "bytes": 17124,
+        "sha256": "0f101096c1a451fc3c11c7b614d02d673d1539df81b758caa2fd1eef91943ea8"
+      },
+      {
+        "path": "/home/obeesley/pioneerML/unified_reco/tail_final_reco.py",
+        "exists": true,
+        "bytes": 11345,
+        "sha256": "314fd34d54e4a6ca78397114a2703830df04cd1034cb2f1acddd04bfde9df620"
+      },
+      {
+        "path": "/home/obeesley/pioneerML/unified_reco/tail_final_mudif.py",
+        "exists": true,
+        "bytes": 9298,
+        "sha256": "67400a4037110e0b1a0cebe538f21202e8436aaecce4c3e2d0bbd378e108b761"
+      },
+      {
+        "path": "/home/obeesley/pioneerML/unified_reco/tail_final_figs.py",
+        "exists": true,
+        "bytes": 26038,
+        "sha256": "be964866bfacd56d335c2f8abe98fb0e24f40f8e3b7caa7d535fba08fefb35aa"
+      },
+      {
+        "path": "/home/obeesley/pioneerML/unified_reco/tail_rates.py",
+        "exists": true,
+        "bytes": 3123,
+        "sha256": "9be1066cd8257b0dfc972852636e36a4a0c766e3fcd56ec8edb5456273695506"
+      }
+    ]
+  },
+  "reference_outputs": [
+    {
+      "path": "/home/obeesley/pioneerML/purity_release/references/final/perf_fl2.json",
+      "exists": true,
+      "bytes": 1037,
+      "sha256": "d4ed3565aa16d4b19c556e1ed8ed036911b13067755ef77494270d3c04c57ffe"
+    },
+    {
+      "path": "/home/obeesley/pioneerML/purity_release/references/final/accbias_final.json",
+      "exists": true,
+      "bytes": 3249,
+      "sha256": "7362fcb0f8f5671b6605023a3bc38c7fbbb711ec64612211ecd8ab457112c0e1"
+    }
+  ],
+  "recorded_runs": {
+    "performance": {
+      "log": {
+        "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/logs/perffl2_1777443.log",
+        "exists": true,
+        "bytes": 957,
+        "sha256": "0f1f940e3f0d641880beb7abe0fb20c0f633f582183695861e6c5522fbe1c163"
+      },
+      "pie_shards": 40,
+      "michel_shards": 394,
+      "population_matches_current_counts": true,
+      "exact_membership_and_contents_compared": false,
+      "reference": "references/final/perf_fl2.json"
+    },
+    "acceptance_bias": {
+      "log": {
+        "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/logs/accfinal_1777323.log",
+        "exists": true,
+        "bytes": 2464,
+        "sha256": "c2d6e05a6533bd5ae7243d2ec68b182d3f007e7985be43eb7ec8f6af2ef6528a"
+      },
+      "pie_shards": 40,
+      "michel_shards": 390,
+      "source_comment_michel_count": 386,
+      "comment_is_stale": true,
+      "exact_historical_shard_list_recovered": false,
+      "reference": "references/final/accbias_final.json"
+    },
+    "time_fit": {
+      "log": {
+        "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/logs/fl2timefit_1776963.log",
+        "exists": true,
+        "bytes": 1573,
+        "sha256": "62091c15daa957fdc14a5d9c20e03698f7527e985362717d973beb532f064ae1"
+      },
+      "pie_shards": 34,
+      "michel_shards": 377,
+      "pie_rows": 8791255,
+      "michel_rows": 97613456,
+      "combined_files": [
+        {
+          "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/ep19fl2_pie_combined.parquet",
+          "exists": true,
+          "bytes": 1272629764
+        },
+        {
+          "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/ep19fl2_michel_combined.parquet",
+          "exists": true,
+          "bytes": 10861408832
+        }
+      ],
+      "reported_fit": 0.0001182595,
+      "reported_pool_truth": 0.0001183748,
+      "reported_raw_closure_percent": -0.097,
+      "reported_selected_pie_low_energy_fraction_percent": 0.4004,
+      "reference_is": "nonradiative generated pool, not nominal Standard Model rate"
+    }
+  },
+  "current_input_inventory": {
+    "pie": {
+      "glob": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/purity_eval/filmg2_ep19fl2_pie/shard_*/pie_eval_events.parquet",
+      "files_found": 40,
+      "files_over_1000000_bytes": 40,
+      "selected_total_bytes": 1616814693,
+      "files": [
+        {
+          "path": "purity_eval/filmg2_ep19fl2_pie/shard_00/pie_eval_events.parquet",
+          "bytes": 41648169,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_pie/shard_01/pie_eval_events.parquet",
+          "bytes": 41546122,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_pie/shard_02/pie_eval_events.parquet",
+          "bytes": 41645903,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_pie/shard_03/pie_eval_events.parquet",
+          "bytes": 41575772,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_pie/shard_04/pie_eval_events.parquet",
+          "bytes": 41532067,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_pie/shard_05/pie_eval_events.parquet",
+          "bytes": 41609859,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_pie/shard_06/pie_eval_events.parquet",
+          "bytes": 41577260,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_pie/shard_07/pie_eval_events.parquet",
+          "bytes": 41561403,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_pie/shard_08/pie_eval_events.parquet",
+          "bytes": 41591015,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_pie/shard_09/pie_eval_events.parquet",
+          "bytes": 41575541,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_pie/shard_10/pie_eval_events.parquet",
+          "bytes": 41579698,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_pie/shard_11/pie_eval_events.parquet",
+          "bytes": 41533909,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_pie/shard_12/pie_eval_events.parquet",
+          "bytes": 41563764,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_pie/shard_13/pie_eval_events.parquet",
+          "bytes": 41566874,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_pie/shard_14/pie_eval_events.parquet",
+          "bytes": 41627169,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_pie/shard_15/pie_eval_events.parquet",
+          "bytes": 41541034,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_pie/shard_16/pie_eval_events.parquet",
+          "bytes": 41629464,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_pie/shard_17/pie_eval_events.parquet",
+          "bytes": 41652759,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_pie/shard_18/pie_eval_events.parquet",
+          "bytes": 41590603,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_pie/shard_19/pie_eval_events.parquet",
+          "bytes": 41655732,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_pie/shard_20/pie_eval_events.parquet",
+          "bytes": 39228758,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_pie/shard_21/pie_eval_events.parquet",
+          "bytes": 39229010,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_pie/shard_22/pie_eval_events.parquet",
+          "bytes": 39197184,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_pie/shard_23/pie_eval_events.parquet",
+          "bytes": 39279492,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_pie/shard_24/pie_eval_events.parquet",
+          "bytes": 39290662,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_pie/shard_25/pie_eval_events.parquet",
+          "bytes": 39279611,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_pie/shard_26/pie_eval_events.parquet",
+          "bytes": 39265431,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_pie/shard_27/pie_eval_events.parquet",
+          "bytes": 39245009,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_pie/shard_28/pie_eval_events.parquet",
+          "bytes": 39268661,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_pie/shard_29/pie_eval_events.parquet",
+          "bytes": 39214947,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_pie/shard_30/pie_eval_events.parquet",
+          "bytes": 39200923,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_pie/shard_31/pie_eval_events.parquet",
+          "bytes": 39210819,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_pie/shard_32/pie_eval_events.parquet",
+          "bytes": 39255643,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_pie/shard_33/pie_eval_events.parquet",
+          "bytes": 39210583,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_pie/shard_34/pie_eval_events.parquet",
+          "bytes": 39244800,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_pie/shard_35/pie_eval_events.parquet",
+          "bytes": 39288601,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_pie/shard_36/pie_eval_events.parquet",
+          "bytes": 39271814,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_pie/shard_37/pie_eval_events.parquet",
+          "bytes": 39298303,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_pie/shard_38/pie_eval_events.parquet",
+          "bytes": 39247572,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_pie/shard_39/pie_eval_events.parquet",
+          "bytes": 39282753,
+          "passes_size_filter": true
+        }
+      ]
+    },
+    "michel": {
+      "glob": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/purity_eval/filmg2_ep19fl2_michel/mix_*/pimu_eval_events.parquet",
+      "files_found": 394,
+      "files_over_1000000_bytes": 394,
+      "selected_total_bytes": 12826136656,
+      "files": [
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_000/pimu_eval_events.parquet",
+          "bytes": 32691373,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_001/pimu_eval_events.parquet",
+          "bytes": 32593449,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_002/pimu_eval_events.parquet",
+          "bytes": 32677955,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_003/pimu_eval_events.parquet",
+          "bytes": 32524783,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_004/pimu_eval_events.parquet",
+          "bytes": 32541248,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_005/pimu_eval_events.parquet",
+          "bytes": 32591157,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_006/pimu_eval_events.parquet",
+          "bytes": 32633297,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_007/pimu_eval_events.parquet",
+          "bytes": 32532953,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_008/pimu_eval_events.parquet",
+          "bytes": 32510888,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_009/pimu_eval_events.parquet",
+          "bytes": 32537506,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_010/pimu_eval_events.parquet",
+          "bytes": 32593007,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_011/pimu_eval_events.parquet",
+          "bytes": 32554566,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_012/pimu_eval_events.parquet",
+          "bytes": 32567969,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_013/pimu_eval_events.parquet",
+          "bytes": 32538011,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_014/pimu_eval_events.parquet",
+          "bytes": 32479149,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_015/pimu_eval_events.parquet",
+          "bytes": 32477293,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_016/pimu_eval_events.parquet",
+          "bytes": 32577631,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_017/pimu_eval_events.parquet",
+          "bytes": 32535867,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_018/pimu_eval_events.parquet",
+          "bytes": 32605852,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_019/pimu_eval_events.parquet",
+          "bytes": 32581604,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_020/pimu_eval_events.parquet",
+          "bytes": 32457546,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_021/pimu_eval_events.parquet",
+          "bytes": 32623571,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_022/pimu_eval_events.parquet",
+          "bytes": 32541264,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_023/pimu_eval_events.parquet",
+          "bytes": 32552204,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_024/pimu_eval_events.parquet",
+          "bytes": 32494703,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_025/pimu_eval_events.parquet",
+          "bytes": 32630723,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_026/pimu_eval_events.parquet",
+          "bytes": 32535040,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_027/pimu_eval_events.parquet",
+          "bytes": 32448670,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_028/pimu_eval_events.parquet",
+          "bytes": 32551334,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_029/pimu_eval_events.parquet",
+          "bytes": 32669684,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_030/pimu_eval_events.parquet",
+          "bytes": 32539252,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_031/pimu_eval_events.parquet",
+          "bytes": 32686209,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_032/pimu_eval_events.parquet",
+          "bytes": 32634854,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_033/pimu_eval_events.parquet",
+          "bytes": 32476287,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_034/pimu_eval_events.parquet",
+          "bytes": 32475221,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_035/pimu_eval_events.parquet",
+          "bytes": 32499629,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_036/pimu_eval_events.parquet",
+          "bytes": 32544633,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_037/pimu_eval_events.parquet",
+          "bytes": 32568423,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_038/pimu_eval_events.parquet",
+          "bytes": 32541913,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_039/pimu_eval_events.parquet",
+          "bytes": 32680955,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_040/pimu_eval_events.parquet",
+          "bytes": 32462809,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_041/pimu_eval_events.parquet",
+          "bytes": 32487845,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_042/pimu_eval_events.parquet",
+          "bytes": 32490035,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_043/pimu_eval_events.parquet",
+          "bytes": 32500814,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_044/pimu_eval_events.parquet",
+          "bytes": 32669469,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_045/pimu_eval_events.parquet",
+          "bytes": 32567537,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_046/pimu_eval_events.parquet",
+          "bytes": 32535095,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_047/pimu_eval_events.parquet",
+          "bytes": 32539624,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_048/pimu_eval_events.parquet",
+          "bytes": 32525290,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_049/pimu_eval_events.parquet",
+          "bytes": 32534436,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_050/pimu_eval_events.parquet",
+          "bytes": 32578742,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_051/pimu_eval_events.parquet",
+          "bytes": 32458077,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_052/pimu_eval_events.parquet",
+          "bytes": 32656593,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_053/pimu_eval_events.parquet",
+          "bytes": 32567302,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_054/pimu_eval_events.parquet",
+          "bytes": 32478330,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_055/pimu_eval_events.parquet",
+          "bytes": 32552347,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_056/pimu_eval_events.parquet",
+          "bytes": 32540706,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_057/pimu_eval_events.parquet",
+          "bytes": 32632322,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_058/pimu_eval_events.parquet",
+          "bytes": 32582128,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_059/pimu_eval_events.parquet",
+          "bytes": 32564212,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_060/pimu_eval_events.parquet",
+          "bytes": 32535747,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_061/pimu_eval_events.parquet",
+          "bytes": 32685637,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_062/pimu_eval_events.parquet",
+          "bytes": 32511990,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_063/pimu_eval_events.parquet",
+          "bytes": 32587891,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_064/pimu_eval_events.parquet",
+          "bytes": 32669974,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_065/pimu_eval_events.parquet",
+          "bytes": 32527807,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_066/pimu_eval_events.parquet",
+          "bytes": 32657289,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_067/pimu_eval_events.parquet",
+          "bytes": 32554035,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_068/pimu_eval_events.parquet",
+          "bytes": 32653477,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_069/pimu_eval_events.parquet",
+          "bytes": 32599864,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_070/pimu_eval_events.parquet",
+          "bytes": 32526983,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_071/pimu_eval_events.parquet",
+          "bytes": 32708146,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_072/pimu_eval_events.parquet",
+          "bytes": 32516385,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_073/pimu_eval_events.parquet",
+          "bytes": 32534365,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_074/pimu_eval_events.parquet",
+          "bytes": 32525306,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_075/pimu_eval_events.parquet",
+          "bytes": 32608913,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_076/pimu_eval_events.parquet",
+          "bytes": 32516204,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_077/pimu_eval_events.parquet",
+          "bytes": 32608443,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_078/pimu_eval_events.parquet",
+          "bytes": 32622818,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_079/pimu_eval_events.parquet",
+          "bytes": 32458441,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_080/pimu_eval_events.parquet",
+          "bytes": 32550647,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_081/pimu_eval_events.parquet",
+          "bytes": 32533675,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_082/pimu_eval_events.parquet",
+          "bytes": 32573293,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_083/pimu_eval_events.parquet",
+          "bytes": 32653710,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_084/pimu_eval_events.parquet",
+          "bytes": 32552935,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_085/pimu_eval_events.parquet",
+          "bytes": 32438710,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_086/pimu_eval_events.parquet",
+          "bytes": 32619557,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_087/pimu_eval_events.parquet",
+          "bytes": 32532965,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_088/pimu_eval_events.parquet",
+          "bytes": 32520613,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_089/pimu_eval_events.parquet",
+          "bytes": 32524301,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_090/pimu_eval_events.parquet",
+          "bytes": 32523858,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_091/pimu_eval_events.parquet",
+          "bytes": 32537694,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_092/pimu_eval_events.parquet",
+          "bytes": 32559762,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_093/pimu_eval_events.parquet",
+          "bytes": 32536595,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_094/pimu_eval_events.parquet",
+          "bytes": 32500242,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_095/pimu_eval_events.parquet",
+          "bytes": 32521573,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_096/pimu_eval_events.parquet",
+          "bytes": 32555327,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_097/pimu_eval_events.parquet",
+          "bytes": 32622758,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_098/pimu_eval_events.parquet",
+          "bytes": 32501500,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_099/pimu_eval_events.parquet",
+          "bytes": 32492485,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_100/pimu_eval_events.parquet",
+          "bytes": 32522746,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_101/pimu_eval_events.parquet",
+          "bytes": 32524558,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_102/pimu_eval_events.parquet",
+          "bytes": 32525006,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_103/pimu_eval_events.parquet",
+          "bytes": 32535162,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_104/pimu_eval_events.parquet",
+          "bytes": 32493292,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_105/pimu_eval_events.parquet",
+          "bytes": 32569838,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_106/pimu_eval_events.parquet",
+          "bytes": 32588772,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_107/pimu_eval_events.parquet",
+          "bytes": 32537273,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_108/pimu_eval_events.parquet",
+          "bytes": 32535062,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_109/pimu_eval_events.parquet",
+          "bytes": 32482538,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_110/pimu_eval_events.parquet",
+          "bytes": 32566364,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_111/pimu_eval_events.parquet",
+          "bytes": 32505137,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_112/pimu_eval_events.parquet",
+          "bytes": 32514395,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_113/pimu_eval_events.parquet",
+          "bytes": 32575776,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_114/pimu_eval_events.parquet",
+          "bytes": 32656899,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_115/pimu_eval_events.parquet",
+          "bytes": 32555419,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_116/pimu_eval_events.parquet",
+          "bytes": 32610434,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_117/pimu_eval_events.parquet",
+          "bytes": 32535036,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_118/pimu_eval_events.parquet",
+          "bytes": 32476815,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_119/pimu_eval_events.parquet",
+          "bytes": 32650208,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_120/pimu_eval_events.parquet",
+          "bytes": 32633967,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_121/pimu_eval_events.parquet",
+          "bytes": 32480486,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_122/pimu_eval_events.parquet",
+          "bytes": 32561318,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_123/pimu_eval_events.parquet",
+          "bytes": 32517082,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_124/pimu_eval_events.parquet",
+          "bytes": 32511939,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_125/pimu_eval_events.parquet",
+          "bytes": 32512886,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_126/pimu_eval_events.parquet",
+          "bytes": 32508961,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_127/pimu_eval_events.parquet",
+          "bytes": 32462588,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_128/pimu_eval_events.parquet",
+          "bytes": 32551338,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_129/pimu_eval_events.parquet",
+          "bytes": 32632423,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_130/pimu_eval_events.parquet",
+          "bytes": 32482208,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_131/pimu_eval_events.parquet",
+          "bytes": 32509306,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_132/pimu_eval_events.parquet",
+          "bytes": 32578969,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_133/pimu_eval_events.parquet",
+          "bytes": 32655293,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_134/pimu_eval_events.parquet",
+          "bytes": 32439260,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_135/pimu_eval_events.parquet",
+          "bytes": 32449599,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_136/pimu_eval_events.parquet",
+          "bytes": 32645192,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_137/pimu_eval_events.parquet",
+          "bytes": 32543188,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_138/pimu_eval_events.parquet",
+          "bytes": 32495879,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_139/pimu_eval_events.parquet",
+          "bytes": 32574667,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_140/pimu_eval_events.parquet",
+          "bytes": 32531207,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_141/pimu_eval_events.parquet",
+          "bytes": 32532702,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_142/pimu_eval_events.parquet",
+          "bytes": 32515704,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_143/pimu_eval_events.parquet",
+          "bytes": 32587025,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_144/pimu_eval_events.parquet",
+          "bytes": 32592732,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_145/pimu_eval_events.parquet",
+          "bytes": 32483693,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_146/pimu_eval_events.parquet",
+          "bytes": 32548547,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_147/pimu_eval_events.parquet",
+          "bytes": 32502473,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_148/pimu_eval_events.parquet",
+          "bytes": 32645007,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_149/pimu_eval_events.parquet",
+          "bytes": 32566723,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_150/pimu_eval_events.parquet",
+          "bytes": 32457045,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_151/pimu_eval_events.parquet",
+          "bytes": 32634555,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_152/pimu_eval_events.parquet",
+          "bytes": 32700317,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_153/pimu_eval_events.parquet",
+          "bytes": 32515487,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_154/pimu_eval_events.parquet",
+          "bytes": 32532964,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_155/pimu_eval_events.parquet",
+          "bytes": 32511031,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_156/pimu_eval_events.parquet",
+          "bytes": 32564937,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_157/pimu_eval_events.parquet",
+          "bytes": 32531540,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_158/pimu_eval_events.parquet",
+          "bytes": 32644082,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_159/pimu_eval_events.parquet",
+          "bytes": 32621576,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_160/pimu_eval_events.parquet",
+          "bytes": 32507175,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_161/pimu_eval_events.parquet",
+          "bytes": 32485940,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_162/pimu_eval_events.parquet",
+          "bytes": 32540709,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_163/pimu_eval_events.parquet",
+          "bytes": 32698098,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_164/pimu_eval_events.parquet",
+          "bytes": 32428923,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_165/pimu_eval_events.parquet",
+          "bytes": 32564081,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_166/pimu_eval_events.parquet",
+          "bytes": 32574410,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_167/pimu_eval_events.parquet",
+          "bytes": 32622472,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_168/pimu_eval_events.parquet",
+          "bytes": 32628156,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_169/pimu_eval_events.parquet",
+          "bytes": 32502814,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_170/pimu_eval_events.parquet",
+          "bytes": 32529326,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_171/pimu_eval_events.parquet",
+          "bytes": 32577701,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_172/pimu_eval_events.parquet",
+          "bytes": 32470454,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_173/pimu_eval_events.parquet",
+          "bytes": 32568959,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_174/pimu_eval_events.parquet",
+          "bytes": 32457702,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_175/pimu_eval_events.parquet",
+          "bytes": 32517851,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_176/pimu_eval_events.parquet",
+          "bytes": 32563239,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_177/pimu_eval_events.parquet",
+          "bytes": 32549321,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_178/pimu_eval_events.parquet",
+          "bytes": 32472060,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_179/pimu_eval_events.parquet",
+          "bytes": 32707974,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_180/pimu_eval_events.parquet",
+          "bytes": 32497128,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_181/pimu_eval_events.parquet",
+          "bytes": 32510558,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_182/pimu_eval_events.parquet",
+          "bytes": 32548409,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_183/pimu_eval_events.parquet",
+          "bytes": 32508781,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_184/pimu_eval_events.parquet",
+          "bytes": 32532464,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_185/pimu_eval_events.parquet",
+          "bytes": 32534954,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_186/pimu_eval_events.parquet",
+          "bytes": 32427230,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_187/pimu_eval_events.parquet",
+          "bytes": 32464115,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_188/pimu_eval_events.parquet",
+          "bytes": 32541950,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_189/pimu_eval_events.parquet",
+          "bytes": 32596382,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_190/pimu_eval_events.parquet",
+          "bytes": 32506703,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_191/pimu_eval_events.parquet",
+          "bytes": 32612280,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_192/pimu_eval_events.parquet",
+          "bytes": 32585989,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_193/pimu_eval_events.parquet",
+          "bytes": 32580861,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_194/pimu_eval_events.parquet",
+          "bytes": 32499572,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_195/pimu_eval_events.parquet",
+          "bytes": 32508130,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_196/pimu_eval_events.parquet",
+          "bytes": 32585157,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_197/pimu_eval_events.parquet",
+          "bytes": 32476852,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_198/pimu_eval_events.parquet",
+          "bytes": 32559071,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_199/pimu_eval_events.parquet",
+          "bytes": 32571509,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_200/pimu_eval_events.parquet",
+          "bytes": 32520065,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_202/pimu_eval_events.parquet",
+          "bytes": 32591823,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_203/pimu_eval_events.parquet",
+          "bytes": 32640658,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_204/pimu_eval_events.parquet",
+          "bytes": 32584928,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_205/pimu_eval_events.parquet",
+          "bytes": 32642513,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_206/pimu_eval_events.parquet",
+          "bytes": 32526464,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_207/pimu_eval_events.parquet",
+          "bytes": 32514177,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_208/pimu_eval_events.parquet",
+          "bytes": 32576505,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_209/pimu_eval_events.parquet",
+          "bytes": 32624319,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_210/pimu_eval_events.parquet",
+          "bytes": 32514601,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_211/pimu_eval_events.parquet",
+          "bytes": 32667797,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_212/pimu_eval_events.parquet",
+          "bytes": 32684977,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_213/pimu_eval_events.parquet",
+          "bytes": 32552195,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_214/pimu_eval_events.parquet",
+          "bytes": 32507182,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_215/pimu_eval_events.parquet",
+          "bytes": 32516516,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_216/pimu_eval_events.parquet",
+          "bytes": 32599018,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_217/pimu_eval_events.parquet",
+          "bytes": 32573623,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_218/pimu_eval_events.parquet",
+          "bytes": 32578134,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_219/pimu_eval_events.parquet",
+          "bytes": 32495867,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_220/pimu_eval_events.parquet",
+          "bytes": 32510127,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_221/pimu_eval_events.parquet",
+          "bytes": 32549959,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_222/pimu_eval_events.parquet",
+          "bytes": 32626686,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_223/pimu_eval_events.parquet",
+          "bytes": 32533266,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_224/pimu_eval_events.parquet",
+          "bytes": 32551627,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_225/pimu_eval_events.parquet",
+          "bytes": 32585949,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_226/pimu_eval_events.parquet",
+          "bytes": 32572396,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_227/pimu_eval_events.parquet",
+          "bytes": 32518623,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_228/pimu_eval_events.parquet",
+          "bytes": 32483679,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_229/pimu_eval_events.parquet",
+          "bytes": 32527819,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_230/pimu_eval_events.parquet",
+          "bytes": 32523564,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_231/pimu_eval_events.parquet",
+          "bytes": 32575168,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_232/pimu_eval_events.parquet",
+          "bytes": 32507416,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_233/pimu_eval_events.parquet",
+          "bytes": 32688011,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_234/pimu_eval_events.parquet",
+          "bytes": 32521747,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_235/pimu_eval_events.parquet",
+          "bytes": 32529078,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_236/pimu_eval_events.parquet",
+          "bytes": 32611217,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_237/pimu_eval_events.parquet",
+          "bytes": 32506579,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_238/pimu_eval_events.parquet",
+          "bytes": 32576999,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_239/pimu_eval_events.parquet",
+          "bytes": 32512573,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_240/pimu_eval_events.parquet",
+          "bytes": 32436641,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_241/pimu_eval_events.parquet",
+          "bytes": 32541046,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_242/pimu_eval_events.parquet",
+          "bytes": 32496284,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_243/pimu_eval_events.parquet",
+          "bytes": 32536218,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_244/pimu_eval_events.parquet",
+          "bytes": 32518707,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_245/pimu_eval_events.parquet",
+          "bytes": 32480166,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_246/pimu_eval_events.parquet",
+          "bytes": 32457471,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_247/pimu_eval_events.parquet",
+          "bytes": 32504730,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_248/pimu_eval_events.parquet",
+          "bytes": 32473230,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_249/pimu_eval_events.parquet",
+          "bytes": 32500369,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_250/pimu_eval_events.parquet",
+          "bytes": 32526436,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_251/pimu_eval_events.parquet",
+          "bytes": 32529788,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_252/pimu_eval_events.parquet",
+          "bytes": 32618924,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_253/pimu_eval_events.parquet",
+          "bytes": 32564775,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_254/pimu_eval_events.parquet",
+          "bytes": 32604280,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_255/pimu_eval_events.parquet",
+          "bytes": 32671329,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_256/pimu_eval_events.parquet",
+          "bytes": 32623298,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_257/pimu_eval_events.parquet",
+          "bytes": 32437311,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_258/pimu_eval_events.parquet",
+          "bytes": 32521725,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_259/pimu_eval_events.parquet",
+          "bytes": 32589447,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_260/pimu_eval_events.parquet",
+          "bytes": 32678212,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_261/pimu_eval_events.parquet",
+          "bytes": 32491356,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_262/pimu_eval_events.parquet",
+          "bytes": 32545247,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_263/pimu_eval_events.parquet",
+          "bytes": 32543627,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_264/pimu_eval_events.parquet",
+          "bytes": 32521998,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_265/pimu_eval_events.parquet",
+          "bytes": 32481997,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_266/pimu_eval_events.parquet",
+          "bytes": 32612383,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_267/pimu_eval_events.parquet",
+          "bytes": 32500377,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_268/pimu_eval_events.parquet",
+          "bytes": 32485118,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_269/pimu_eval_events.parquet",
+          "bytes": 32658148,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_270/pimu_eval_events.parquet",
+          "bytes": 32488911,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_271/pimu_eval_events.parquet",
+          "bytes": 32596567,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_272/pimu_eval_events.parquet",
+          "bytes": 32622408,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_273/pimu_eval_events.parquet",
+          "bytes": 32565009,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_274/pimu_eval_events.parquet",
+          "bytes": 32636901,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_275/pimu_eval_events.parquet",
+          "bytes": 32580413,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_276/pimu_eval_events.parquet",
+          "bytes": 32530858,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_277/pimu_eval_events.parquet",
+          "bytes": 32528506,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_278/pimu_eval_events.parquet",
+          "bytes": 32679331,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_279/pimu_eval_events.parquet",
+          "bytes": 32531954,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_280/pimu_eval_events.parquet",
+          "bytes": 32600406,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_281/pimu_eval_events.parquet",
+          "bytes": 32512576,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_282/pimu_eval_events.parquet",
+          "bytes": 32531143,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_283/pimu_eval_events.parquet",
+          "bytes": 32509562,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_284/pimu_eval_events.parquet",
+          "bytes": 32659055,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_285/pimu_eval_events.parquet",
+          "bytes": 32500620,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_286/pimu_eval_events.parquet",
+          "bytes": 32491665,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_287/pimu_eval_events.parquet",
+          "bytes": 32504823,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_288/pimu_eval_events.parquet",
+          "bytes": 32560837,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_289/pimu_eval_events.parquet",
+          "bytes": 32583956,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_290/pimu_eval_events.parquet",
+          "bytes": 32583053,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_291/pimu_eval_events.parquet",
+          "bytes": 32526358,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_292/pimu_eval_events.parquet",
+          "bytes": 32547285,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_293/pimu_eval_events.parquet",
+          "bytes": 32512751,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_294/pimu_eval_events.parquet",
+          "bytes": 32572962,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_295/pimu_eval_events.parquet",
+          "bytes": 32544062,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_296/pimu_eval_events.parquet",
+          "bytes": 32578374,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_297/pimu_eval_events.parquet",
+          "bytes": 32563853,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_298/pimu_eval_events.parquet",
+          "bytes": 32538151,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_299/pimu_eval_events.parquet",
+          "bytes": 32549085,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_300/pimu_eval_events.parquet",
+          "bytes": 32629718,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_301/pimu_eval_events.parquet",
+          "bytes": 32568192,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_302/pimu_eval_events.parquet",
+          "bytes": 32535738,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_303/pimu_eval_events.parquet",
+          "bytes": 32499307,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_304/pimu_eval_events.parquet",
+          "bytes": 32474132,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_305/pimu_eval_events.parquet",
+          "bytes": 32672796,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_306/pimu_eval_events.parquet",
+          "bytes": 32611034,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_307/pimu_eval_events.parquet",
+          "bytes": 32582119,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_308/pimu_eval_events.parquet",
+          "bytes": 32524044,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_309/pimu_eval_events.parquet",
+          "bytes": 32617437,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_310/pimu_eval_events.parquet",
+          "bytes": 32557635,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_311/pimu_eval_events.parquet",
+          "bytes": 32486502,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_312/pimu_eval_events.parquet",
+          "bytes": 32634413,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_313/pimu_eval_events.parquet",
+          "bytes": 32475777,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_314/pimu_eval_events.parquet",
+          "bytes": 32632993,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_315/pimu_eval_events.parquet",
+          "bytes": 32561973,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_316/pimu_eval_events.parquet",
+          "bytes": 32496128,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_317/pimu_eval_events.parquet",
+          "bytes": 32582354,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_318/pimu_eval_events.parquet",
+          "bytes": 32545789,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_319/pimu_eval_events.parquet",
+          "bytes": 32530537,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_320/pimu_eval_events.parquet",
+          "bytes": 32502926,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_321/pimu_eval_events.parquet",
+          "bytes": 32636454,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_323/pimu_eval_events.parquet",
+          "bytes": 32526561,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_324/pimu_eval_events.parquet",
+          "bytes": 32622900,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_325/pimu_eval_events.parquet",
+          "bytes": 32483008,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_326/pimu_eval_events.parquet",
+          "bytes": 32475679,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_327/pimu_eval_events.parquet",
+          "bytes": 32657350,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_328/pimu_eval_events.parquet",
+          "bytes": 32503576,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_329/pimu_eval_events.parquet",
+          "bytes": 32510390,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_330/pimu_eval_events.parquet",
+          "bytes": 32464248,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_331/pimu_eval_events.parquet",
+          "bytes": 32630294,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_332/pimu_eval_events.parquet",
+          "bytes": 32500190,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_333/pimu_eval_events.parquet",
+          "bytes": 32542078,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_334/pimu_eval_events.parquet",
+          "bytes": 32570275,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_335/pimu_eval_events.parquet",
+          "bytes": 32525317,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_336/pimu_eval_events.parquet",
+          "bytes": 32603685,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_337/pimu_eval_events.parquet",
+          "bytes": 32456379,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_338/pimu_eval_events.parquet",
+          "bytes": 32567324,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_339/pimu_eval_events.parquet",
+          "bytes": 32501657,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_340/pimu_eval_events.parquet",
+          "bytes": 32521367,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_341/pimu_eval_events.parquet",
+          "bytes": 32481085,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_342/pimu_eval_events.parquet",
+          "bytes": 32519112,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_343/pimu_eval_events.parquet",
+          "bytes": 32486065,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_344/pimu_eval_events.parquet",
+          "bytes": 32510269,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_345/pimu_eval_events.parquet",
+          "bytes": 32578965,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_346/pimu_eval_events.parquet",
+          "bytes": 32556761,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_347/pimu_eval_events.parquet",
+          "bytes": 32695593,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_348/pimu_eval_events.parquet",
+          "bytes": 32588879,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_349/pimu_eval_events.parquet",
+          "bytes": 32470362,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_350/pimu_eval_events.parquet",
+          "bytes": 32658833,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_351/pimu_eval_events.parquet",
+          "bytes": 32597135,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_352/pimu_eval_events.parquet",
+          "bytes": 32553632,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_353/pimu_eval_events.parquet",
+          "bytes": 32509599,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_354/pimu_eval_events.parquet",
+          "bytes": 32690075,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_355/pimu_eval_events.parquet",
+          "bytes": 32513530,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_356/pimu_eval_events.parquet",
+          "bytes": 32427631,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_357/pimu_eval_events.parquet",
+          "bytes": 32565259,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_358/pimu_eval_events.parquet",
+          "bytes": 32600991,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_359/pimu_eval_events.parquet",
+          "bytes": 32556965,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_360/pimu_eval_events.parquet",
+          "bytes": 32671198,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_361/pimu_eval_events.parquet",
+          "bytes": 32560192,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_362/pimu_eval_events.parquet",
+          "bytes": 32549173,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_363/pimu_eval_events.parquet",
+          "bytes": 32525361,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_364/pimu_eval_events.parquet",
+          "bytes": 32518663,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_365/pimu_eval_events.parquet",
+          "bytes": 32573804,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_366/pimu_eval_events.parquet",
+          "bytes": 32612132,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_367/pimu_eval_events.parquet",
+          "bytes": 32555910,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_368/pimu_eval_events.parquet",
+          "bytes": 32544363,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_369/pimu_eval_events.parquet",
+          "bytes": 32528779,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_370/pimu_eval_events.parquet",
+          "bytes": 32538392,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_371/pimu_eval_events.parquet",
+          "bytes": 32602960,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_372/pimu_eval_events.parquet",
+          "bytes": 32574829,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_373/pimu_eval_events.parquet",
+          "bytes": 32473747,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_374/pimu_eval_events.parquet",
+          "bytes": 32578245,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_375/pimu_eval_events.parquet",
+          "bytes": 32625563,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_376/pimu_eval_events.parquet",
+          "bytes": 32695528,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_377/pimu_eval_events.parquet",
+          "bytes": 32486987,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_378/pimu_eval_events.parquet",
+          "bytes": 32514223,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_379/pimu_eval_events.parquet",
+          "bytes": 32510548,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_380/pimu_eval_events.parquet",
+          "bytes": 32560489,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_381/pimu_eval_events.parquet",
+          "bytes": 32592900,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_382/pimu_eval_events.parquet",
+          "bytes": 32601225,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_383/pimu_eval_events.parquet",
+          "bytes": 32563586,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_384/pimu_eval_events.parquet",
+          "bytes": 32719948,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_385/pimu_eval_events.parquet",
+          "bytes": 32524499,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_386/pimu_eval_events.parquet",
+          "bytes": 32536814,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_387/pimu_eval_events.parquet",
+          "bytes": 32530621,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_388/pimu_eval_events.parquet",
+          "bytes": 32660240,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_389/pimu_eval_events.parquet",
+          "bytes": 32535868,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_390/pimu_eval_events.parquet",
+          "bytes": 32520633,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_391/pimu_eval_events.parquet",
+          "bytes": 32680780,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_392/pimu_eval_events.parquet",
+          "bytes": 32468033,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_393/pimu_eval_events.parquet",
+          "bytes": 32482453,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_394/pimu_eval_events.parquet",
+          "bytes": 32578724,
+          "passes_size_filter": true
+        },
+        {
+          "path": "purity_eval/filmg2_ep19fl2_michel/mix_395/pimu_eval_events.parquet",
+          "bytes": 32526924,
+          "passes_size_filter": true
+        }
+      ]
+    }
+  },
+  "inventory_hashes_data_contents": false,
+  "table_recipes": {
+    "performance": {
+      "window_ns": [
+        -300,
+        495
+      ],
+      "true_fiducial_mm": {
+        "z_open": [
+          1.2,
+          4.8
+        ],
+        "abs_x_lt": 8,
+        "abs_y_lt": 8
+      },
+      "truth_htp_gt": 0.5,
+      "pred_htp_gt": 0.5,
+      "angular_bin_width_degrees": 6,
+      "angular_bin_entries_gt": 200,
+      "angular_halfwidth_percentiles": [
+        16,
+        84
+      ],
+      "hw_at120_deg_behavior": "first available bin with center in [117,123], usually center 117"
+    },
+    "acceptance_bias": {
+      "window_lo_ns": -300,
+      "window_hi_variants_ns": [
+        500,
+        495
+      ],
+      "clean_time_difference_lt_ns": 5,
+      "pred_acceptance_ge": 0.5,
+      "truth_acceptance_gt": 0.5,
+      "uses_generator_weights": true
+    },
+    "shared_michel_purification": {
+      "excluded_event_type_bits": [
+        "0x1",
+        "0x200"
+      ],
+      "truth_positron_energy_le_mev": 55
+    }
+  },
+  "validation": {
+    "report": "provenance/final_analysis_validation.json",
+    "formula_parity": "Exact on 8000 synthetic events compared to extracted original functions",
+    "full_reference_table_reproduction": false
+  },
+  "external_assets": [
+    {
+      "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/crystalLUT.npy",
+      "exists": true,
+      "bytes": 8528
+    },
+    {
+      "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/validLUT.npy",
+      "exists": true,
+      "bytes": 2616
+    },
+    {
+      "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/pytorch.sif",
+      "exists": true,
+      "bytes": 4430405632
+    },
+    {
+      "path": "/home/obeesley/main/setenv.sh",
+      "exists": true,
+      "bytes": 1673
+    },
+    {
+      "path": "/home/obeesley/thesis_ref",
+      "exists": false
+    }
+  ],
+  "remaining_reproducibility_limits": [
+    "Current glob populations differ between archived figures/tables; acceptance historical 390-file membership unresolved.",
+    "Full source-file train/validation/evaluation split manifest not recovered.",
+    "Original conversion requires external ROOT files and PIONEER simulation runtime/dictionaries.",
+    "Origin-resliced preparation uses simulation mixing origin, not detector-only observable preparation.",
+    "Only first 20 final Michel mixed inputs retained by production launcher.",
+    "Final energy-spectrum figure script remains external. Final time-fit is exported and synthetic-parity checked, but its full frozen combined-input fit has not been rerun.",
+    "Historical tail/main joins use positional or float32 energy equality; stable shared identifiers must be validated for full public cutflow reproduction.",
+    "Defended thesis source/output path absent during audit; cannot verify document agrees with all recovered results."
+  ],
+  "time_fit_export": {
+    "module": "purity.final_analysis.time_fit",
+    "provenance": "provenance/time_fit_export.json",
+    "validation": "provenance/validation_time_fit.json",
+    "full_historical_fit_reproduced": false
+  },
+  "thesis_review_update": "The defended PDF was supplied after the original pipeline audit and compared in provenance/thesis_checks.json. The author confirms parts of the current code are newer than the thesis; earlier statements about the unavailable PDF describe the initial audit, not current availability. Historical numeric matches do not prescribe reverting current code."
+}

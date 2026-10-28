@@ -1,0 +1,552 @@
+{
+ "schema_version": 1,
+ "audited_on": "2026-10-28",
+ "scope": "Training entry points, training-data recipes and the archived training pools of the two selected checkpoints. Pool contents are identified by parquet metadata, size and mtime, not content hashes.",
+ "trainers": {
+  "main": {
+   "path": "/home/obeesley/pioneerML/unified_reco/train_purity.py",
+   "bytes": 27728,
+   "md5": "3dd1dd4e763cf0db4bfd9d07d55afd55",
+   "sha256": "b0e8ca4f69604bdbd4c44c3692946d8e522572b40f1fc775a5091be8bf878f55",
+   "release_destination": "src/purity/training/main.py",
+   "release_sha256": "5303c77e66fe3bfb2b1fac3ef3d1b876cdf3aae48f5e6e48f1654a90d039979c",
+   "note": "MD5 equals train_purity.md5 in logs/train_purity_filmg2_1706750.log (phase 2). Phase 1 log records d90331b425f788bda756944878d1aa15, not preserved; its stored task weights differ from the current defaults only in w_angle_decorr=0.5.",
+   "release_changes": [
+    "imports and class name",
+    "training environment pinned before import",
+    "--w_angle_decorr override",
+    "checkpoint provenance",
+    "non-zero exit on failure"
+   ]
+  },
+  "tail": {
+   "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/train_tail10.py",
+   "bytes": 31595,
+   "md5": "e04086aea8874ce9a1c5f37e05aa7855",
+   "sha256": "5145b33c85201688bc4aff73c48a8509261f8febcd25b7a22aa7a89448b64885",
+   "release_destination": "src/purity/training/tail.py",
+   "release_sha256": "3006046c10dc72b8950b7062b51dbd23dd00627294e627860a52c53c16350dd6",
+   "note": "Modified after TAIL10 (2026-08-06) to rebuild the DataLoader at each shard rotation; --historical_tail10_loader restores the TAIL10 behaviour.",
+   "release_changes": [
+    "imports and required paths",
+    "--historical_tail10_loader",
+    "checkpoint provenance",
+    "single-file DataLoader built (source crashed)",
+    "non-zero exit on failure"
+   ]
+  }
+ },
+ "training_data_recipes": {
+  "mix_tail_shard": {
+   "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/mix_shard_tail.py",
+   "bytes": 2420,
+   "md5": "634ac641e3780ef33019e3a2da624ff0",
+   "sha256": "183d66e0b637ea04d12bd7ca35f62fed0a32eede7848255d227e8fe9d353baa0",
+   "release_destination": "src/purity/preprocessing/mix_tail_shard.py",
+   "release_sha256": "f2b7fd22a52019f15083f219fa9f8a1628d7e11b167ae5ce2789245f47bcf455"
+  },
+  "concat_clean": {
+   "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/concat_train_fixed.py",
+   "bytes": 1349,
+   "md5": "0675ce02ed44c0241d09b8359445bfa9",
+   "sha256": "8b71e669832dcc92b4dc9c0c67e4b39514360dfdd43fdcc4541d54634b517226",
+   "release_destination": "src/purity/preprocessing/concat_clean.py",
+   "release_sha256": "1376926d54ae0a320183e3766a1fadd0074826d4bedd775646fcb51012f841e9"
+  },
+  "main_mixing_launcher": {
+   "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/mix_train_fixed.sbatch",
+   "bytes": 1619,
+   "md5": "01fbc5b4f301d9338ebcefaf9eee97a5",
+   "sha256": "1f38310f7dc8cca2c2396907646c09be7cd1e439fa0d14f67b27df4b3da38406"
+  },
+  "main_concat_launcher": {
+   "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/concat_train_fixed.sbatch",
+   "bytes": 543,
+   "md5": "bd1cf9f9aecd701a03425cf2c47c1f55",
+   "sha256": "3eaaded54258b362dac270d493742a0815977742cea9d645f23b6886077b35d7"
+  },
+  "tail_mixing_launcher": {
+   "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10_chain.sbatch",
+   "bytes": 1649,
+   "md5": "11d447c97555c4c1dfe4a6177165c0fb",
+   "sha256": "64cf418e3b172be2cb941114ce15d6951445c2cd890579aed0de4c3698066ce0"
+  },
+  "mixer_revision_note": "Archived pools were mixed with the July 2026 pileup_mixer (tail10 2026-07-05, train10M_fixed 2026-07-09); no commit preserves it. The release mixer contains the later accidental-sampling revision."
+ },
+ "historical_launchers": {
+  "train_filmg.sbatch": {
+   "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/train_filmg.sbatch",
+   "bytes": 6194,
+   "md5": "8cb757b3bd48b7a6830c00d35abb597f",
+   "sha256": "32cc62764fe1457789e9e38dd45d3ad1ebe0e4f550e73194aa49fdbc118a8a65"
+  },
+  "train_filmg2.sbatch": {
+   "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/train_filmg2.sbatch",
+   "bytes": 6922,
+   "md5": "5fc5760f7833f5426747985a7b472225",
+   "sha256": "650ae63b664266dc783f1b6928dd232039ffd609cbb9f8612e6542a2441a0e51"
+  },
+  "train_tail10.sbatch": {
+   "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/train_tail10.sbatch",
+   "bytes": 828,
+   "md5": "3ab2310db0e955e48691545a66cbddbb",
+   "sha256": "0b94fca21d501f465cd389eb3d3ff568576ea35fe52981cdcd785b6507351bb8"
+  }
+ },
+ "training_logs": {
+  "filmg_phase1": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/logs/train_purity_filmg_1706553.log",
+  "filmg2_phase2": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/logs/train_purity_filmg2_1706750.log",
+  "tail10": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/logs/train_tail10_1596517.log"
+ },
+ "recorded_runs": {
+  "main_hybridv2_filmg": {
+   "epochs_kept": [
+    1,
+    4
+   ],
+   "launched_epochs": 20,
+   "stopped_during_epoch": 5,
+   "w_angle_decorr": 0.5,
+   "base_lr_by_epoch": {
+    "1-4": 0.0005
+   },
+   "minutes_per_epoch": [
+    63.9,
+    68.2,
+    68.2,
+    68.3
+   ]
+  },
+  "main_hybridv2_filmg2": {
+   "epochs": [
+    5,
+    20
+   ],
+   "resume": "main_hybridv2_filmg_epoch4.pth",
+   "w_angle_decorr": 0.05,
+   "base_lr_by_epoch": {
+    "5-9": 0.00025,
+    "10-14": 0.000125,
+    "15-19": 6.25e-05,
+    "20": 3.125e-05
+   },
+   "total_hours": 20.0,
+   "selected_epoch": 19
+  },
+  "PURITY_TAIL10": {
+   "epochs": 10,
+   "lr_by_epoch": {
+    "1-2": 0.0005,
+    "3-5": 0.00025,
+    "6-8": 0.000125,
+    "9-10": 6.25e-05
+   },
+   "train_events_loaded": 997380,
+   "shards_actually_used": [
+    "train_000_osl.parquet",
+    "train_001_osl.parquet",
+    "train_002_osl.parquet",
+    "train_003_osl.parquet",
+    "train_004_osl.parquet"
+   ],
+   "validation_events": 199504,
+   "trainable_parameters": 7379107,
+   "total_hours": 11.51
+  }
+ },
+ "archived_pools": {
+  "train10M_fixed": [
+   {
+    "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/train10M_fixed/train.parquet",
+    "rows": 10000000,
+    "row_groups": 40,
+    "bytes": 41157836176,
+    "mtime_utc": "2026-07-10T08:26:37.116549+00:00"
+   },
+   {
+    "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/train10M_fixed/val.parquet",
+    "rows": 1000000,
+    "row_groups": 4,
+    "bytes": 4053327522,
+    "mtime_utc": "2026-07-10T08:31:18.533905+00:00"
+   }
+  ],
+  "tail10_train": {
+   "files": 45,
+   "rows_total": 9000000,
+   "shards": [
+    {
+     "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/train_000_osl.parquet",
+     "rows": 200000,
+     "row_groups": 1,
+     "bytes": 873971862,
+     "mtime_utc": "2026-07-06T03:57:53.252516+00:00"
+    },
+    {
+     "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/train_001_osl.parquet",
+     "rows": 200000,
+     "row_groups": 1,
+     "bytes": 874034349,
+     "mtime_utc": "2026-07-06T03:59:08.034309+00:00"
+    },
+    {
+     "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/train_002_osl.parquet",
+     "rows": 200000,
+     "row_groups": 1,
+     "bytes": 874640779,
+     "mtime_utc": "2026-07-06T03:29:01.565716+00:00"
+    },
+    {
+     "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/train_003_osl.parquet",
+     "rows": 200000,
+     "row_groups": 1,
+     "bytes": 872231447,
+     "mtime_utc": "2026-07-06T03:15:32.884436+00:00"
+    },
+    {
+     "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/train_004_osl.parquet",
+     "rows": 200000,
+     "row_groups": 1,
+     "bytes": 872729638,
+     "mtime_utc": "2026-07-06T03:55:39.297721+00:00"
+    },
+    {
+     "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/train_005_osl.parquet",
+     "rows": 200000,
+     "row_groups": 1,
+     "bytes": 872565372,
+     "mtime_utc": "2026-07-06T03:55:39.701742+00:00"
+    },
+    {
+     "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/train_006_osl.parquet",
+     "rows": 200000,
+     "row_groups": 1,
+     "bytes": 871554806,
+     "mtime_utc": "2026-07-06T04:16:43.011920+00:00"
+    },
+    {
+     "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/train_007_osl.parquet",
+     "rows": 200000,
+     "row_groups": 1,
+     "bytes": 872726821,
+     "mtime_utc": "2026-07-06T04:18:30.662389+00:00"
+    },
+    {
+     "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/train_008_osl.parquet",
+     "rows": 200000,
+     "row_groups": 1,
+     "bytes": 872463950,
+     "mtime_utc": "2026-07-06T03:54:50.723258+00:00"
+    },
+    {
+     "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/train_009_osl.parquet",
+     "rows": 200000,
+     "row_groups": 1,
+     "bytes": 872016571,
+     "mtime_utc": "2026-07-06T03:56:17.007634+00:00"
+    },
+    {
+     "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/train_010_osl.parquet",
+     "rows": 200000,
+     "row_groups": 1,
+     "bytes": 872827859,
+     "mtime_utc": "2026-07-06T04:09:31.338935+00:00"
+    },
+    {
+     "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/train_011_osl.parquet",
+     "rows": 200000,
+     "row_groups": 1,
+     "bytes": 873082734,
+     "mtime_utc": "2026-07-06T04:07:13.134917+00:00"
+    },
+    {
+     "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/train_012_osl.parquet",
+     "rows": 200000,
+     "row_groups": 1,
+     "bytes": 873433343,
+     "mtime_utc": "2026-07-06T03:55:23.917941+00:00"
+    },
+    {
+     "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/train_013_osl.parquet",
+     "rows": 200000,
+     "row_groups": 1,
+     "bytes": 872334540,
+     "mtime_utc": "2026-07-06T03:55:23.389915+00:00"
+    },
+    {
+     "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/train_014_osl.parquet",
+     "rows": 200000,
+     "row_groups": 1,
+     "bytes": 874236240,
+     "mtime_utc": "2026-07-06T03:53:27.411027+00:00"
+    },
+    {
+     "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/train_015_osl.parquet",
+     "rows": 200000,
+     "row_groups": 1,
+     "bytes": 871993056,
+     "mtime_utc": "2026-07-06T03:53:26.756994+00:00"
+    },
+    {
+     "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/train_016_osl.parquet",
+     "rows": 200000,
+     "row_groups": 1,
+     "bytes": 873415961,
+     "mtime_utc": "2026-07-06T03:58:35.724670+00:00"
+    },
+    {
+     "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/train_017_osl.parquet",
+     "rows": 200000,
+     "row_groups": 1,
+     "bytes": 874811683,
+     "mtime_utc": "2026-07-06T03:54:26.586032+00:00"
+    },
+    {
+     "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/train_018_osl.parquet",
+     "rows": 200000,
+     "row_groups": 1,
+     "bytes": 873260388,
+     "mtime_utc": "2026-07-06T04:16:24.891001+00:00"
+    },
+    {
+     "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/train_019_osl.parquet",
+     "rows": 200000,
+     "row_groups": 1,
+     "bytes": 871227578,
+     "mtime_utc": "2026-07-06T04:16:46.660105+00:00"
+    },
+    {
+     "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/train_020_osl.parquet",
+     "rows": 200000,
+     "row_groups": 1,
+     "bytes": 872963102,
+     "mtime_utc": "2026-07-06T04:18:23.853043+00:00"
+    },
+    {
+     "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/train_021_osl.parquet",
+     "rows": 200000,
+     "row_groups": 1,
+     "bytes": 872442221,
+     "mtime_utc": "2026-07-06T04:18:27.638235+00:00"
+    },
+    {
+     "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/train_022_osl.parquet",
+     "rows": 200000,
+     "row_groups": 1,
+     "bytes": 873898766,
+     "mtime_utc": "2026-07-06T04:12:46.692852+00:00"
+    },
+    {
+     "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/train_023_osl.parquet",
+     "rows": 200000,
+     "row_groups": 1,
+     "bytes": 871039659,
+     "mtime_utc": "2026-07-06T04:12:46.711853+00:00"
+    },
+    {
+     "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/train_024_osl.parquet",
+     "rows": 200000,
+     "row_groups": 1,
+     "bytes": 873699453,
+     "mtime_utc": "2026-07-06T04:13:25.183808+00:00"
+    },
+    {
+     "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/train_025_osl.parquet",
+     "rows": 200000,
+     "row_groups": 1,
+     "bytes": 873196601,
+     "mtime_utc": "2026-07-06T04:13:24.685783+00:00"
+    },
+    {
+     "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/train_026_osl.parquet",
+     "rows": 200000,
+     "row_groups": 1,
+     "bytes": 872725799,
+     "mtime_utc": "2026-07-06T04:13:35.985357+00:00"
+    },
+    {
+     "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/train_027_osl.parquet",
+     "rows": 200000,
+     "row_groups": 1,
+     "bytes": 872237235,
+     "mtime_utc": "2026-07-06T04:07:58.291209+00:00"
+    },
+    {
+     "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/train_028_osl.parquet",
+     "rows": 200000,
+     "row_groups": 1,
+     "bytes": 872046373,
+     "mtime_utc": "2026-07-06T04:16:41.433840+00:00"
+    },
+    {
+     "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/train_029_osl.parquet",
+     "rows": 200000,
+     "row_groups": 1,
+     "bytes": 872649658,
+     "mtime_utc": "2026-07-06T04:16:41.835860+00:00"
+    },
+    {
+     "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/train_030_osl.parquet",
+     "rows": 200000,
+     "row_groups": 1,
+     "bytes": 872191488,
+     "mtime_utc": "2026-07-06T04:09:26.542691+00:00"
+    },
+    {
+     "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/train_031_osl.parquet",
+     "rows": 200000,
+     "row_groups": 1,
+     "bytes": 871203200,
+     "mtime_utc": "2026-07-06T04:09:28.263779+00:00"
+    },
+    {
+     "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/train_032_osl.parquet",
+     "rows": 200000,
+     "row_groups": 1,
+     "bytes": 872746778,
+     "mtime_utc": "2026-07-06T04:06:24.146432+00:00"
+    },
+    {
+     "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/train_033_osl.parquet",
+     "rows": 200000,
+     "row_groups": 1,
+     "bytes": 874181281,
+     "mtime_utc": "2026-07-06T04:06:23.645406+00:00"
+    },
+    {
+     "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/train_034_osl.parquet",
+     "rows": 200000,
+     "row_groups": 1,
+     "bytes": 872632318,
+     "mtime_utc": "2026-07-06T04:13:28.927998+00:00"
+    },
+    {
+     "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/train_035_osl.parquet",
+     "rows": 200000,
+     "row_groups": 1,
+     "bytes": 872896684,
+     "mtime_utc": "2026-07-06T04:13:44.882809+00:00"
+    },
+    {
+     "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/train_036_osl.parquet",
+     "rows": 200000,
+     "row_groups": 1,
+     "bytes": 873463939,
+     "mtime_utc": "2026-07-06T04:13:40.457585+00:00"
+    },
+    {
+     "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/train_037_osl.parquet",
+     "rows": 200000,
+     "row_groups": 1,
+     "bytes": 872986979,
+     "mtime_utc": "2026-07-06T04:10:58.654369+00:00"
+    },
+    {
+     "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/train_038_osl.parquet",
+     "rows": 200000,
+     "row_groups": 1,
+     "bytes": 873060335,
+     "mtime_utc": "2026-07-06T04:16:46.924119+00:00"
+    },
+    {
+     "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/train_039_osl.parquet",
+     "rows": 200000,
+     "row_groups": 1,
+     "bytes": 872940940,
+     "mtime_utc": "2026-07-06T04:16:46.408093+00:00"
+    },
+    {
+     "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/train_040_osl.parquet",
+     "rows": 200000,
+     "row_groups": 1,
+     "bytes": 872535663,
+     "mtime_utc": "2026-07-06T04:10:25.507687+00:00"
+    },
+    {
+     "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/train_041_osl.parquet",
+     "rows": 200000,
+     "row_groups": 1,
+     "bytes": 870764402,
+     "mtime_utc": "2026-07-06T04:10:26.329729+00:00"
+    },
+    {
+     "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/train_042_osl.parquet",
+     "rows": 200000,
+     "row_groups": 1,
+     "bytes": 872098685,
+     "mtime_utc": "2026-07-06T04:08:49.616815+00:00"
+    },
+    {
+     "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/train_043_osl.parquet",
+     "rows": 200000,
+     "row_groups": 1,
+     "bytes": 872898928,
+     "mtime_utc": "2026-07-06T04:06:00.204217+00:00"
+    },
+    {
+     "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/train_044_osl.parquet",
+     "rows": 200000,
+     "row_groups": 1,
+     "bytes": 872510571,
+     "mtime_utc": "2026-07-06T04:18:07.310202+00:00"
+    }
+   ]
+  },
+  "tail10_validation": [
+   {
+    "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/val_0_osl.parquet",
+    "rows": 200000,
+    "row_groups": 1,
+    "bytes": 872640012,
+    "mtime_utc": "2026-07-06T04:18:06.739173+00:00"
+   },
+   {
+    "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/val_1_osl.parquet",
+    "rows": 200000,
+    "row_groups": 1,
+    "bytes": 874478934,
+    "mtime_utc": "2026-07-06T04:16:10.554273+00:00"
+   }
+  ],
+  "tail10_eval": [
+   {
+    "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/eval_pie_osl.parquet",
+    "rows": 150000,
+    "row_groups": 1,
+    "bytes": 742727239,
+    "mtime_utc": "2026-07-06T04:13:35.930354+00:00"
+   },
+   {
+    "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/eval_michel_osl.parquet",
+    "rows": 150000,
+    "row_groups": 1,
+    "bytes": 525739385,
+    "mtime_utc": "2026-07-06T03:38:22.834159+00:00"
+   },
+   {
+    "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/eval_mudif_osl.parquet",
+    "rows": 150000,
+    "row_groups": 1,
+    "bytes": 736974992,
+    "mtime_utc": "2026-07-06T03:48:33.024124+00:00"
+   },
+   {
+    "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail10/eval_pidif_osl.parquet",
+    "rows": 150000,
+    "row_groups": 1,
+    "bytes": 536528749,
+    "mtime_utc": "2026-07-06T03:13:25.118098+00:00"
+   }
+  ],
+  "unmixed_split_dir": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/unmixed_split",
+  "tail_source_pools": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/parquet/{michel,pie,mudif,pidif}"
+ },
+ "release_launchers": [
+  "scripts/slurm/concat_train_main.sbatch",
+  "scripts/slurm/mix_train_main.sbatch",
+  "scripts/slurm/mix_train_tail.sbatch",
+  "scripts/slurm/train_main.sbatch",
+  "scripts/slurm/train_tail.sbatch"
+ ],
+ "validation": "provenance/validation_training.json"
+}

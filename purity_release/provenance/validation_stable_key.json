@@ -1,0 +1,152 @@
+{
+ "schema_version": 1,
+ "status": "passed",
+ "checked_utc": "2026-10-28",
+ "scope": "Stable event key (source_file, source_row) added to main events and tail predictions. Pristine inference sources (dataset.py, benchmark.py, eval_tail.py reconstructed by reverting the change; SHA-256 equal to the previous release manifest) vs modified sources, both through the pinned profiles in pytorch.sif on CPU with 2 threads.",
+ "inputs": "First 1500 rows of tail10/eval_pie_osl.parquet (7 fail the 250-hit filter) and tail10/eval_michel_osl.parquet, written with 400-row row groups.",
+ "slurm_job": 2286278,
+ "pre_existing_columns_identical": {
+  "main/mic_events.parquet": {
+   "rows": 1500,
+   "columns": 56,
+   "differing": []
+  },
+  "main/mic_lyso_clusters.parquet": {
+   "rows": 7500,
+   "columns": 4,
+   "differing": []
+  },
+  "main/mic_lyso_hits.parquet": {
+   "rows": 26967,
+   "columns": 14,
+   "differing": []
+  },
+  "main/mic_slices.parquet": {
+   "rows": 4391,
+   "columns": 28,
+   "differing": []
+  },
+  "main/pie_events.parquet": {
+   "rows": 1493,
+   "columns": 56,
+   "differing": []
+  },
+  "main/pie_lyso_clusters.parquet": {
+   "rows": 7465,
+   "columns": 4,
+   "differing": []
+  },
+  "main/pie_lyso_hits.parquet": {
+   "rows": 36576,
+   "columns": 14,
+   "differing": []
+  },
+  "main/pie_slices.parquet": {
+   "rows": 4171,
+   "columns": 28,
+   "differing": []
+  },
+  "tail/predictions.parquet": {
+   "rows": 2993,
+   "columns": 32,
+   "differing": []
+  }
+ },
+ "added_columns": {
+  "main/mic_events.parquet": [
+   "source_file",
+   "source_row"
+  ],
+  "main/pie_events.parquet": [
+   "source_file",
+   "source_row"
+  ],
+  "tail/predictions.parquet": [
+   "source_file",
+   "source_row"
+  ]
+ },
+ "key_checks": {
+  "main_runner": {
+   "michel.parquet": {
+    "rows": 1500,
+    "unique_rows": 1500,
+    "live_E_matches_input": true,
+    "first": 0,
+    "last": 1499
+   },
+   "pie.parquet": {
+    "rows": 1493,
+    "unique_rows": 1493,
+    "live_E_matches_input": true,
+    "first": 0,
+    "last": 1499
+   }
+  },
+  "tail": {
+   "michel.parquet": {
+    "rows": 1500,
+    "unique_rows": 1500,
+    "live_E_matches_input": true,
+    "first": 0,
+    "last": 1499
+   },
+   "pie.parquet": {
+    "rows": 1493,
+    "unique_rows": 1493,
+    "live_E_matches_input": true,
+    "first": 0,
+    "last": 1499
+   }
+  },
+  "tail_stream": {
+   "michel.parquet": {
+    "rows": 1500,
+    "unique_rows": 1500,
+    "live_E_matches_input": true,
+    "first": 0,
+    "last": 1499
+   },
+   "pie.parquet": {
+    "rows": 1493,
+    "unique_rows": 1493,
+    "live_E_matches_input": true,
+    "first": 0,
+    "last": 1499
+   }
+  },
+  "tail_chunk0": {
+   "pie.parquet": {
+    "rows": 746,
+    "unique_rows": 746,
+    "live_E_matches_input": true,
+    "first": 0,
+    "last": 749
+   }
+  },
+  "tail_chunk1": {
+   "pie.parquet": {
+    "rows": 747,
+    "unique_rows": 747,
+    "live_E_matches_input": true,
+    "first": 750,
+    "last": 1499
+   }
+  },
+  "chunks_cover_plain": true,
+  "stream_covers_plain": true
+ },
+ "main_tail_join": {
+  "main_rows": 2993,
+  "tail_rows": 2993,
+  "both": 2993,
+  "main_only": 0,
+  "tail_only": 0,
+  "live_E_agrees": true
+ },
+ "standalone_check": {
+  "status": "passed",
+  "after_change": true
+ },
+ "example_workflow": "completed after the change"
+}

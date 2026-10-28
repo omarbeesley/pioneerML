@@ -1,0 +1,70 @@
+{
+  "status": "passed",
+  "scope": "Small end-to-end pipeline demonstration, not performance reproduction.",
+  "started_utc": "2026-09-10T20:15:24.305502+00:00",
+  "finished_utc": "2026-09-10T20:17:08.711530+00:00",
+  "events_requested_per_channel": 12,
+  "release_only_mount": true,
+  "physical_release_copy": true,
+  "original_repository_available": false,
+  "runtime_manifest": "provenance/environment.json",
+  "script": "scripts/run_example_analysis.py",
+  "script_sha256": "2ba628c40e7be119598111343730ec31df77c0d8fbc10bd29a8c03b5de5dd95e",
+  "steps": [
+    {
+      "name": "mix_pie",
+      "status": "complete",
+      "returncode": 0
+    },
+    {
+      "name": "reslice_pie",
+      "status": "complete",
+      "returncode": 0
+    },
+    {
+      "name": "mix_michel",
+      "status": "complete",
+      "returncode": 0
+    },
+    {
+      "name": "reslice_michel",
+      "status": "complete",
+      "returncode": 0
+    },
+    {
+      "name": "infer_main",
+      "status": "complete",
+      "returncode": 0
+    },
+    {
+      "name": "infer_tail",
+      "status": "complete",
+      "returncode": 0
+    },
+    {
+      "name": "benchmark_plots",
+      "status": "complete",
+      "returncode": 0
+    },
+    {
+      "name": "tail_score_plots",
+      "status": "complete",
+      "returncode": 0
+    }
+  ],
+  "event_rows": {
+    "main/sample_000_pie_resliced_events.parquet": 12,
+    "main/sample_001_michel_resliced_events.parquet": 12,
+    "preparation/michel_resliced.parquet": 12,
+    "preparation/pie_resliced.parquet": 12,
+    "tail/predictions.parquet": 24
+  },
+  "figures": {
+    "benchmark_plots": 31,
+    "tail_score_plots": 8
+  },
+  "limitations": [
+    "Tiny fixture populations do not measure performance.",
+    "No full simulation production or thesis-statistics benchmark was run."
+  ]
+}

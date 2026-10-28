@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "status": "passed",
+  "population": "Controlled synthetic fixture, 512 events per class; not physics performance",
+  "original_producers_compared": [
+    "tail_reveal_cache.py",
+    "tail_final_reco.py",
+    "tail_final_mudif.py",
+    "tail_final_figs.py",
+    "michel_leak_audit.py"
+  ],
+  "cache_arrays_compared_exactly": 48,
+  "statistics_keys_compared_exactly": [
+    "mudar_cutflow",
+    "mudar_cutflow_reco",
+    "mudif_angular",
+    "mudif_cutflow_reco",
+    "mudif_scan_retuned",
+    "mudif_survivors",
+    "mudif_tradeoff",
+    "mudif_working_points",
+    "pidif_cutflow",
+    "pidif_cutflow_reco",
+    "reco_cutflow_meta",
+    "roc_auc"
+  ],
+  "renderers_executed_on_controlled_inputs": [
+    "cutflows",
+    "beforeafter",
+    "tradeoff",
+    "irreducible",
+    "angular"
+  ],
+  "missing_overlap_mask_rejected": true,
+  "production_data_read_by_test": false,
+  "producer_figure_saving": "Suppressed during exact numeric parity; cache renderers saved real PNG/PDF files",
+  "limitations": "Numerical port parity on controlled inputs; complete historical populations were not rerun.",
+  "modules_syntax_checked": 14,
+  "commands_import_and_help_without_analysis_data_reads": [
+    "cache",
+    "reconstructed",
+    "mudif",
+    "diagnostics",
+    "cutflows",
+    "beforeafter",
+    "angular",
+    "tradeoff",
+    "irreducible",
+    "overlap_masks"
+  ],
+  "existing_output_rejected": true
+}

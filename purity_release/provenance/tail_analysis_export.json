@@ -1,0 +1,288 @@
+{
+  "schema_version": 1,
+  "status": "portable_recipes_validated_on_controlled_inputs_and_real_angular_reference",
+  "modules": [
+    {
+      "source_path": "/home/obeesley/pioneerML/unified_reco/tail_reveal_cache.py",
+      "source_sha256": "bbd17d12f43e44afeb5df85b8e821f0a8d579e6f6b2a77efb06d70f822d77465",
+      "export_path": "src/purity/final_analysis/tail/cache.py",
+      "source_bytes": 12649,
+      "command": "python -m purity.final_analysis.tail.cache",
+      "input_kind": "pipeline",
+      "coverage": "Build the final overlap-masked reconstructed-energy spectrum and irreducible cache.",
+      "historical_module_docstring": "Cache per-stage reco-energy spectra and the irreducible-muDIF arrays.\n\nDerived from tail_final_reco.py (identical joins, weights, window); plots are drawn\nlogin-side from the npz.  SLURM only.\nThesis-style tail cutflows on the MAIN model's reconstructed quantities.\n\nSame chains, weights, annotations, and page-format layouts as the truth-quantity cutflows of\ntail_thesis_figures.py, with three swaps per event: the reconstructed acceptance decision for\nthe truth flag, the reconstructed positron energy plus the reconstructed dead-material\nestimate for the true deposit, and the consensus positron time for the true time. The prompt\nwindow is anchored data-driven at the reconstructed pie onset (+2 to +32 ns), so the time\nframe convention of each generation cannot shift the cut.\n\nInputs (all positional joins, verified per piece by float32 equality of the tail predictions'\ndeposited_energy against the main summaries' truth_live_E):\n  pie    : norad_eval2_drop tail predictions x purity_eval/nodrop_ep12_pie main summaries\n  michel : michel_eval_inwin_drop tail predictions x purity_eval/nodrop_ep12_michel_inwin\n           main summaries (RMD removed via truth_event_type bit 0x200, per analysis policy)\n  piDIF  : eval10 eval-mode tail predictions x purity_eval/tail_osl pidif summaries\n\nOutputs: figures/AI/tail_cutflow_michel_reco_ep19.png, tail_cutflow_pidif_reco_ep19.png, and the\n'mudar_cutflow_reco' / 'pidif_cutflow_reco' blocks in figures/AI/tail_stats.json.\n",
+      "export_sha256": "04c75466a0f6c84040903cee91e9441da56b09aaec026fde177fb4f2dd4be4ce",
+      "export_bytes": 12947
+    },
+    {
+      "source_path": "/home/obeesley/pioneerML/unified_reco/tail_final_reco.py",
+      "source_sha256": "314fd34d54e4a6ca78397114a2703830df04cd1034cb2f1acddd04bfde9df620",
+      "export_path": "src/purity/final_analysis/tail/reconstructed.py",
+      "source_bytes": 11345,
+      "command": "python -m purity.final_analysis.tail.reconstructed",
+      "input_kind": "pipeline",
+      "coverage": "Historical reconstructed Michel and pion-DIF cutflows and statistics.",
+      "historical_module_docstring": "Thesis-style tail cutflows on the MAIN model's reconstructed quantities.\n\nSame chains, weights, annotations, and page-format layouts as the truth-quantity cutflows of\ntail_thesis_figures.py, with three swaps per event: the reconstructed acceptance decision for\nthe truth flag, the reconstructed positron energy plus the reconstructed dead-material\nestimate for the true deposit, and the consensus positron time for the true time. The prompt\nwindow is anchored data-driven at the reconstructed pie onset (+2 to +32 ns), so the time\nframe convention of each generation cannot shift the cut.\n\nInputs (all positional joins, verified per piece by float32 equality of the tail predictions'\ndeposited_energy against the main summaries' truth_live_E):\n  pie    : norad_eval2_drop tail predictions x purity_eval/nodrop_ep12_pie main summaries\n  michel : michel_eval_inwin_drop tail predictions x purity_eval/nodrop_ep12_michel_inwin\n           main summaries (RMD removed via truth_event_type bit 0x200, per analysis policy)\n  piDIF  : eval10 eval-mode tail predictions x purity_eval/tail_osl pidif summaries\n\nOutputs: figures/AI/tail_cutflow_michel_reco_ep19.png, tail_cutflow_pidif_reco_ep19.png, and the\n'mudar_cutflow_reco' / 'pidif_cutflow_reco' blocks in figures/AI/tail_stats.json.\n",
+      "export_sha256": "763ce563398d7baa142ffa8c8d17d41789307cf762d077b0364d32037ec893bf",
+      "export_bytes": 11625
+    },
+    {
+      "source_path": "/home/obeesley/pioneerML/unified_reco/tail_final_mudif.py",
+      "source_sha256": "67400a4037110e0b1a0cebe538f21202e8436aaecce4c3e2d0bbd378e108b761",
+      "export_path": "src/purity/final_analysis/tail/mudif.py",
+      "source_bytes": 9298,
+      "command": "python -m purity.final_analysis.tail.mudif",
+      "input_kind": "pipeline",
+      "coverage": "Historical nodrop-epoch12 muon-DIF cutflow and threshold scan.",
+      "historical_module_docstring": "muDIF cutflow on the retuned reconstructed chain + aggressiveness sweep of the muDIF veto.\n\nFigure 1 (tail_cutflow_mudif_reco.png): staged cutflow of muDIF against pie at the 18:1\nacceptance normalization, on reconstructed energy/acceptance/time, stages\n  (0) acceptance -> (1) prompt window -> (2) topology>0.99 -> (3) muon veto -> (4) piDIF veto.\nFigure 2 (tail_mudif_retuned_scan.png): tail bias vs residual contamination of the FULL\nretuned chain as the muon-DIF threshold tightens from 0.46, each point labeled by the\nthreshold, with the pie efficiency alongside.\nStats appended to tail_stats.json (mudif_cutflow_reco, mudif_scan_retuned).\n",
+      "export_sha256": "fc3e5f232bf47bba41a0c62ad98523b74520e4d213676a22b90ac64ccafffecd",
+      "export_bytes": 9875
+    },
+    {
+      "source_path": "/home/obeesley/pioneerML/unified_reco/tail_final_figs.py",
+      "source_sha256": "be964866bfacd56d335c2f8abe98fb0e24f40f8e3b7caa7d535fba08fefb35aa",
+      "export_path": "src/purity/final_analysis/tail/diagnostics.py",
+      "source_bytes": 26038,
+      "command": "python -m purity.final_analysis.tail.diagnostics",
+      "input_kind": "pipeline",
+      "coverage": "Historical deposited-energy cutflows, ROC, muon-DIF bias and survivor figures.",
+      "historical_module_docstring": "Thesis-style tail-reveal figures for the AI chapter, generated from the settled eval parquets.\n\nPorts the SETTLED analysis logic verbatim from:\n  cutflow_settled.py   (muDAR 5-panel chain, gen-weighted michel, kPienu+kMudif removed)\n  cutflow_pidif.py     (piDIF 4-panel chain, absolute [6,36] ns window on norad/eval10 samples)\n  dif_mudif_corrected.py (muDIF suppression spectrum + delta-ray-corrected tail-fraction sweep)\n  mudif_tradeoff.py    (bias vs contamination working-point curve, pie5M Ecorr, 20:1 norm)\n  mudif_surv_analysis.py (survivor muon E-deposition / decay-KE, suppression vs angle)\nand renders in the thesis figure style (figures/ml_pedagogy/figstyle.py conventions).\nOutputs PNGs to thesis_ref/figures/AI/ and a stats JSON alongside.\n",
+      "export_sha256": "e48d878dd3d2c5a73152206fcddb5397ae04179687bd7fbf2ee656b04c95da63",
+      "export_bytes": 27205
+    },
+    {
+      "source_path": "/home/obeesley/pioneerML/unified_reco/fig_tail_reveal_cutflows.py",
+      "source_sha256": "b4c8791bc29718c05c8df7be28891a368bacf10b7ee82c36c1423ea3242ff886",
+      "export_path": "src/purity/final_analysis/tail/cutflows.py",
+      "source_bytes": 3459,
+      "command": "python -m purity.final_analysis.tail.cutflows",
+      "input_kind": "cache",
+      "coverage": "Render the three reconstructed background cutflows from cached spectra.",
+      "historical_module_docstring": "The tail-reveal cutflows: one panel per background, drawn from the cached spectra.\n\nThe background spectrum is drawn at every stage of its chain in successively lighter\nshades, so the reader watches it melt away from under the \\pie spectrum, whose low-energy\ntail stays visible because the vertical range is set from the data.  Legends sit above the\naxes and quote each stage as the surviving fraction of the accepted sample.\n",
+      "export_sha256": "cfbd73b0bac7763e17dc786e044a34108e93943fd6bea13c68fd239b628bc36d",
+      "export_bytes": 3769
+    },
+    {
+      "source_path": "/home/obeesley/pioneerML/unified_reco/fig_tail_beforeafter.py",
+      "source_sha256": "9fdb7d8e1cf58387743ae3321942c9dd8a56c8904ece8494a7b148a034791e50",
+      "export_path": "src/purity/final_analysis/tail/beforeafter.py",
+      "source_bytes": 2897,
+      "command": "python -m purity.final_analysis.tail.beforeafter",
+      "input_kind": "cache",
+      "coverage": "Render before/after spectra and the historical combined annotation.",
+      "historical_module_docstring": "FIGURE -- the whole tail measurement in two panels: every channel before and after.\n\nLeft: \\pie and the three backgrounds at acceptance, at their physical rates per stopped\npion.  Right: the same four after the complete selection chain.  The Michel and piDIF\nspectra vanish, the muDIF residue survives at the loose working point, and the \\pie\nlow-energy tail stands revealed below the 56 MeV line.\n",
+      "export_sha256": "079700240b921af26e045f2b2c64d705cec82ea3e706df21b3a50ec24e38123d",
+      "export_bytes": 3330
+    },
+    {
+      "source_path": "/home/obeesley/pioneerML/unified_reco/fig10_mudif_angular.py",
+      "source_sha256": "b14043bb330b39387a6404f9852e8693a791437e59e6f7e40e3e6d7a1e1d72db",
+      "export_path": "src/purity/final_analysis/tail/angular.py",
+      "source_bytes": 3605,
+      "command": "python -m purity.final_analysis.tail.angular",
+      "input_kind": "either",
+      "coverage": "Render angular suppression and signal-tail bias from central prediction columns.",
+      "historical_module_docstring": "FIGURE 10 -- why an aggressive muDIF veto biases the tail.\n\nThree stacked panels against the true positron polar angle, all from the train-mode\ncentral cache (58 MB, safe outside SLURM):\n\n  (a) muDIF suppression of a tight in-flight-muon veto;\n  (b) the fraction of accepted pie events that veto removes;\n  (c) the pie tail fraction, the quantity the selection must not sculpt.\n\nThe point of the figure is the alignment of (b) and (c): the veto removes pie\npreferentially at the angles where the tail fraction is largest, which is how an\nenergy-blind topological cut acquires an energy bias.\n",
+      "export_sha256": "c6707d42f9b947a43a5550b57a3664a870a0f253381332d9ed68ae4c0429016f",
+      "export_bytes": 3783
+    },
+    {
+      "source_path": "/home/obeesley/pioneerML/unified_reco/fig11_mudif_tradeoff.py",
+      "source_sha256": "743f63686aaf2feb1df55b6077fc1a0969490354b6b85d7c01f378817c472d98",
+      "export_path": "src/purity/final_analysis/tail/tradeoff.py",
+      "source_bytes": 3097,
+      "command": "python -m purity.final_analysis.tail.tradeoff",
+      "input_kind": "cache",
+      "coverage": "Render the retuned muon-DIF contamination versus bias scan.",
+      "historical_module_docstring": "FIGURE 11 -- the muDIF veto trade-off: contamination against induced tail bias.\n\nOne curve on the two axes the requirement is written in. Both quantities are plotted so that\n\"worse\" runs the same way, the bias as a magnitude on a logarithmic axis, so the desirable\ncorner is the empty bottom left and the failure to reach it is geometry rather than assertion.\nThe veto threshold rides on the marker colour, which keeps the scan knob visible without a\nsingle label on the plane. No fit is drawn: the points bend away from a power law at the loose\nend, and a line through them would misstate the data exactly where the reader looks.\n",
+      "export_sha256": "b9f9677afdf7f80705e731549a1647b118dae764a54902354f068e6bb7b5d950",
+      "export_bytes": 3107
+    },
+    {
+      "source_path": "/home/obeesley/pioneerML/unified_reco/fig12_mudif_irreducible.py",
+      "source_sha256": "bc6797ab956424ec14380b84857a5a0ea9c0cc3d9bed106aa05b7ac9ae0a65a6",
+      "export_path": "src/purity/final_analysis/tail/irreducible.py",
+      "source_bytes": 2718,
+      "command": "python -m purity.final_analysis.tail.irreducible",
+      "input_kind": "cache",
+      "coverage": "Render accepted and tight-veto muon-DIF deposit/decay-energy densities.",
+      "historical_module_docstring": "FIGURE 12 -- the irreducible muDIF population, as two densities on one scale.\n\nThe plane is (energy the muon deposited in the ATAR) against (its kinetic energy at the\nmoment of decay).  Left: all accepted muDIF events.  Right: the survivors of the complete\nselection chain with the veto at its tightest.  Each panel is normalized to its own sample,\nso the two densities are directly comparable: the accepted population runs down the\nenergy-conservation band, while the survivors abandon it for the top-left corner, full\nbirth energy and less than a single MIP deposit.\n",
+      "export_sha256": "2e9bc96ad37a89920b0391c9fd00c14a77361757e6af106bf986b11fffc8ae8d",
+      "export_bytes": 2950
+    },
+    {
+      "source_path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/michel_leak_audit.py",
+      "source_sha256": "f9213837a7224eb9a150724611ddec8f1f5257c045200d75c8458cd0d5369394",
+      "export_path": "src/purity/final_analysis/tail/overlap_masks.py",
+      "source_bytes": 6529,
+      "command": "python -m purity.final_analysis.tail.overlap_masks",
+      "input_kind": "pipeline",
+      "coverage": "Build the historical Michel source-overlap masks and report the three-way cutflow.",
+      "historical_module_docstring": "Audit and fix the michel_inwin training leak.\n\ncombine_partition_michel2.py's sorted-glob prefix swept all 550 shards of generation job\n1595422 into the michel pools, and groups t000-t044 of that job are the tail-reveal model's\nTRAINING michel groups (tail10_chain.sbatch / mix_shard_tail.py). Every michel_inwin piece\ntherefore carries ~12.7% trigger decays the tail model trained on.\n\nThis job:\n  1. builds the exact truth-key set of the leaked decays (495 source shards, 4 float32 keys);\n  2. flags every michel_inwin event whose trigger decay is in that set (mask parquet/piece);\n  3. re-derives the reco-axis muDAR chain (tail_final_reco cuts) on ALL / CLEAN / LEAKED\n     subsets, so the memorization question is answered by direct comparison;\n  4. recounts the non-time residue on the clean subset and reports whether the displayed\n     fig9a event is leaked.\n\nSLURM only.\n",
+      "export_sha256": "c67f3e1b27e866d02e59704b2ab76e89be65544c5218c778fb6d85f6f58f1a07",
+      "export_bytes": 6674
+    },
+    {
+      "source_path": "/home/obeesley/pioneerML/unified_reco/tail_rates.py",
+      "source_sha256": "9be1066cd8257b0dfc972852636e36a4a0c766e3fcd56ec8edb5456273695506",
+      "export_path": "src/purity/final_analysis/tail/rates.py",
+      "source_bytes": 3123,
+      "coverage": "Direct numerical/plotting dependency; copied without numerical edits.",
+      "export_sha256": "9be1066cd8257b0dfc972852636e36a4a0c766e3fcd56ec8edb5456273695506",
+      "export_bytes": 3123
+    },
+    {
+      "source_path": "/home/obeesley/pioneerML/unified_reco/tail_figstyle.py",
+      "source_sha256": "f1ececfc13e2bd11b8a0a77851cb6261d3208bcd9739fd1c52b12c41f45539ab",
+      "export_path": "src/purity/final_analysis/tail/style.py",
+      "source_bytes": 1087,
+      "coverage": "Direct numerical/plotting dependency; copied without numerical edits.",
+      "export_sha256": "f1ececfc13e2bd11b8a0a77851cb6261d3208bcd9739fd1c52b12c41f45539ab",
+      "export_bytes": 1087
+    }
+  ],
+  "source_snapshot_note": "Hashes identify the inspected working files, not an immutable training-time revision.",
+  "local_support_files": [
+    {
+      "file": "src/purity/final_analysis/tail/_runtime.py",
+      "sha256": "71fc4bf742b742d0b5723d06ea5c8d774d4efa39108ef42f7b2480bf6d2384c7",
+      "bytes": 8697
+    },
+    {
+      "file": "src/purity/final_analysis/tail/__init__.py",
+      "sha256": "27aff76d34b30b807e2796bf6e84fb72f3c638d69aa6b0c44979dd83ba101d60",
+      "bytes": 83
+    },
+    {
+      "file": "docs/tail_analysis.md",
+      "sha256": "aa5d9fd4900ac9ebeb03d4a34f4c024e37a7792346d789ddb0511ae03107521d",
+      "bytes": 12728
+    },
+    {
+      "file": "tests/check_tail_analysis_reference.py",
+      "sha256": "eeb14fde7f12a7f4b33b6f559d14d63ca0bec8828a097c014cbb6e0c734f36c7",
+      "bytes": 10846
+    }
+  ],
+  "dependency_coverage": {
+    "local": [
+      "rates.py",
+      "style.py",
+      "_runtime.py"
+    ],
+    "external_python": [
+      "numpy",
+      "pandas",
+      "pyarrow",
+      "matplotlib"
+    ],
+    "original_checkout_required_at_runtime": false,
+    "source_code_coverage": "All eleven requested tail sources plus the directly required overlap-mask producer and local command/provenance support. No top-level analysis data reads on module import."
+  },
+  "port_changes": [
+    "Wrapped each historical top-level recipe in run() and a command-line entry point; numerical execution order retained.",
+    "Replaced hardcoded input/output roots with --pipeline-dir, --cache-dir, and --output-dir.",
+    "Changed helper imports to local package rates/style; no original-repository runtime import paths.",
+    "Recorded actual file reads, columns, counts, source fingerprints and output hashes; optional full parquet hashing.",
+    "Fail on missing required pair files, Michel masks, row-count mismatches or incomplete positional alignment instead of skipping pieces.",
+    "Expose diagnostics Michel piece limit as --michel-nmax with default107 from historical chain launcher; --skip-cutflows preserved.",
+    "Protect existing per-recipe run records, figure/cache outputs and overlap mask parquets; intentional tail_stats.json merges preserved.",
+    "Historical beforeafter \u00b11.1% literal uncertainty and misleading full-chain titles moved behind --historical-annotation; source captions reproducible explicitly. Default annotations do not imply a new uncertainty estimate.",
+    "Corrected stale mode/cap comments without changing implemented predictions, masks, energy caps or rates."
+  ],
+  "historical_version_distinctions": {
+    "cache": "filmg2 epoch19 pie/Michel + nodrop epoch12 DIF, reconstructed0-90MeV, Michel overlap exclusion required.",
+    "reconstructed": "Earlier filmg2 epoch19 pie/Michel reconstructed0-90MeV cutflow/statistics, no overlap exclusion.",
+    "mudif": "nodrop epoch12 pie/muon-DIF reconstructed0-75MeV, signal/muon-DIF18:1 at acceptance, threshold scan.",
+    "diagnostics": "Earlier deposited-energy/corrected-Epure analyses, distinct cuts and20:1 muon-DIF study.",
+    "beforeafter": "Combines cache spectra with the separate retuned scan; muon-DIF shown histogram omits pion-DIF veto; source literal uncertainty is optional.",
+    "irreducible": "Historical cache tight-veto selection omits pion-DIF veto despite original full-chain caption."
+  },
+  "validation": {
+    "schema_version": 1,
+    "status": "passed",
+    "population": "Controlled synthetic fixture, 512 events per class; not physics performance",
+    "original_producers_compared": [
+      "tail_reveal_cache.py",
+      "tail_final_reco.py",
+      "tail_final_mudif.py",
+      "tail_final_figs.py",
+      "michel_leak_audit.py"
+    ],
+    "cache_arrays_compared_exactly": 48,
+    "statistics_keys_compared_exactly": [
+      "mudar_cutflow",
+      "mudar_cutflow_reco",
+      "mudif_angular",
+      "mudif_cutflow_reco",
+      "mudif_scan_retuned",
+      "mudif_survivors",
+      "mudif_tradeoff",
+      "mudif_working_points",
+      "pidif_cutflow",
+      "pidif_cutflow_reco",
+      "reco_cutflow_meta",
+      "roc_auc"
+    ],
+    "renderers_executed_on_controlled_inputs": [
+      "cutflows",
+      "beforeafter",
+      "tradeoff",
+      "irreducible",
+      "angular"
+    ],
+    "missing_overlap_mask_rejected": true,
+    "production_data_read_by_test": false,
+    "producer_figure_saving": "Suppressed during exact numeric parity; cache renderers saved real PNG/PDF files",
+    "limitations": "Numerical port parity on controlled inputs; complete historical populations were not rerun.",
+    "modules_syntax_checked": 14,
+    "commands_import_and_help_without_analysis_data_reads": [
+      "cache",
+      "reconstructed",
+      "mudif",
+      "diagnostics",
+      "cutflows",
+      "beforeafter",
+      "angular",
+      "tradeoff",
+      "irreducible",
+      "overlap_masks"
+    ],
+    "existing_output_rejected": true
+  },
+  "real_reference": {
+    "schema_version": 1,
+    "kind": "Historical prediction-column subset, no new inference",
+    "source_path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail_reveal_eval10/predictions_drop.parquet",
+    "source_sha256": "64cb807de0ae2a7d5e4c89ff4793810f76f4574c3784d96fa9d6482642040816",
+    "source_bytes": 57849221,
+    "columns": [
+      "is_pie",
+      "is_mudif",
+      "acceptance",
+      "muon_dif_score",
+      "deposited_energy",
+      "positron_theta"
+    ],
+    "rows": 598528,
+    "subset_file": "angular_predictions.parquet",
+    "subset_sha256": "990dc00dba2a6221f6d4ff120cbbfb34696b12ae002bf9d529dc3fb535afbb22",
+    "subset_bytes": 6536620,
+    "selection": "All source rows in original order, six columns only; no row filtering",
+    "intended_command": "python -m purity.final_analysis.tail.angular --cache-dir references/tail --output-dir outputs/tail_angular"
+  },
+  "real_reference_render": {
+    "command": "python -m purity.final_analysis.tail.angular --cache-dir references/tail --output-dir outputs/tail_angular_reference",
+    "run_record": "outputs/tail_angular_reference/angular.run.json",
+    "status": "passed",
+    "accepted_pie_rows": 90596,
+    "accepted_mudif_rows": 87825,
+    "printed_50percent_pie_threshold": 0.0531,
+    "printed_suppression": 138,
+    "precision_note": "Threshold and suppression copied at the original console rounding precision."
+  },
+  "missing_historical_artifacts": [
+    "The original thesis output tail_reveal_cache.npz and tail_stats.json were not found; no substitutes are presented as physical references."
+  ],
+  "full_historical_pool_recomputed": false
+}

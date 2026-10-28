@@ -1,0 +1,122 @@
+{
+  "schema_version": 1,
+  "status": "passed",
+  "checked_utc": "2026-09-10T19:14:53.857115+00:00",
+  "module": "purity.final_analysis.tail.mudif_tradeoff",
+  "validation": {
+    "parse": "passed",
+    "import": "passed",
+    "help": "passed",
+    "export_sha256": "12757525ee214862520ad8a1bdaec1235b80fdebfa587652e95c7535af793e4f",
+    "reference_parity": {
+      "numerical_scan_arrays": "exact",
+      "raw_signal_rows": 100000,
+      "raw_mudif_rows": 149459,
+      "result": {
+        "pie_eff_pct": [
+          99,
+          95,
+          90,
+          80,
+          70,
+          50,
+          30
+        ],
+        "contamination_pct": [
+          49.711973035391566,
+          32.15447961535473,
+          24.08547467237168,
+          17.545875318939967,
+          13.920508512522147,
+          10.161423417648141,
+          7.1280665037777995
+        ],
+        "bias_pct": [
+          0.33408681789386385,
+          0.3190511989228151,
+          -0.0740168749539305,
+          -1.00753515217602,
+          0.6732951009583488,
+          0.6728163904667461,
+          9.644625249229332
+        ],
+        "bias_uncertainty_pct": [
+          0.6769078153246807,
+          1.827129823215858,
+          2.7422836753555617,
+          4.161602880757047,
+          5.34567912016899,
+          8.202559525117056,
+          12.850237380296628
+        ],
+        "accepted_pie": 60236,
+        "accepted_mudif": 87822,
+        "tail_rescale": 2.425610738255034
+      }
+    },
+    "render": {
+      "returncode": 0,
+      "log": "points (eff, contam, bias+/-err):\n   99%   49.71%   +0.33+/-0.68%\n   95%   32.15%   +0.32+/-1.83%\n   90%   24.09%   -0.07+/-2.74%\n   80%   17.55%   -1.01+/-4.16%\n   70%   13.92%   +0.67+/-5.35%\n   50%   10.16%   +0.67+/-8.20%\n   30%    7.13%   +9.64+/-12.85%\nDONE\n",
+      "outputs": [
+        {
+          "file": "22_mudif_bias_vs_contam.json",
+          "bytes": 749,
+          "sha256": "c45eb9c78dd20404133918de64f524060bbd9c70cafc9fe4acec83db8a8b51b8"
+        },
+        {
+          "file": "22_mudif_bias_vs_contam.pdf",
+          "bytes": 21992,
+          "sha256": "e25e9392570ebfc23cfae10cbdef0af3d48c15f331c5babd24e503fb2ca27ae7"
+        },
+        {
+          "file": "22_mudif_bias_vs_contam.png",
+          "bytes": 85119,
+          "sha256": "d92a4f6255a304a82e023dfaf6b9c3bd32f5757541809e569e364b975ed86b2b"
+        },
+        {
+          "file": "mudif_tradeoff.run.json",
+          "bytes": 3499,
+          "sha256": "44479cab87fc96d3638940570da8578ea84448ed78655d615bd8da5bc6e14f0d"
+        }
+      ]
+    },
+    "nonempty_output_guard": "passed"
+  },
+  "input_extractions": [
+    {
+      "original": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/pie5M_pie_full.parquet",
+      "original_bytes": 108404730,
+      "original_sha256": "5daaba3a074ada2b79095ae01fe5dab79a37cf04cd996755cc492cbbd7788aab",
+      "columns": [
+        "deposited_energy",
+        "dead_E",
+        "Epure",
+        "acceptance",
+        "is_pie",
+        "muon_dif_score"
+      ],
+      "selection": "first100000 rows before cuts",
+      "rows": 100000,
+      "export": "pie100k.parquet",
+      "export_sha256": "fcfef8181815f412bba91e7abddd8656627d43868d3e25948df8e71895f044b8"
+    },
+    {
+      "original": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/tail_reveal_eval10/predictions.parquet",
+      "original_bytes": 57858143,
+      "original_sha256": "ecc1bec58d3a08ebd30086d69b0e32b76d0344ef237e401107f760b2bc85452a",
+      "columns": [
+        "is_mudif",
+        "muon_dif_score",
+        "deposited_energy",
+        "dead_E",
+        "acceptance"
+      ],
+      "selection": "all rows",
+      "rows": 598528,
+      "export": "mudif_predictions.parquet",
+      "export_sha256": "01dc525f3db9caa37874b489e7ebc4b64854c70ed7cc5ece011c93183fecb7b5"
+    }
+  ],
+  "environment": "Production pytorch.sif container, Python3.11, release-only mount plus actual input extracts and reference text used only by validation harness.",
+  "scope": "Angle estimator: all598528 rows of actual central predictions_drop. Standalone tradeoff: first100000 raw historical signal rows, all central plain predictions (149459 muDIF rows before selection). Numerical parity is exact on supplied inputs; bounded tradeoff is not the full historical rate."
+}

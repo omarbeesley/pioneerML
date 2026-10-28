@@ -1,0 +1,32 @@
+{
+  "status": "complete",
+  "started_utc": "2026-09-10T18:34:13.448808+00:00",
+  "finished_utc": "2026-09-10T18:34:24.537255+00:00",
+  "output_tags": [
+    "pie_eval",
+    "pimu_eval"
+  ],
+  "dump_atar_hits": true,
+  "output_event_rows": {
+    "pie_eval_events.parquet": 4,
+    "pimu_eval_events.parquet": 4
+  },
+  "output_hit_rows": {
+    "pie_eval_atar_hits.parquet": 336,
+    "pimu_eval_atar_hits.parquet": 271
+  },
+  "device": "cpu",
+  "dependencies": {
+    "torch": "2.7.0+cu128",
+    "torch-geometric": "2.7.0",
+    "numpy": "2.2.5",
+    "pandas": "3.0.2",
+    "pyarrow": "24.0.0",
+    "scipy": "1.17.1",
+    "matplotlib": "3.10.9",
+    "tqdm": "4.67.1"
+  },
+  "scope": "Pinned main profile with explicit tags and existing per-hit analysis outputs; 4 events per channel.",
+  "release_only_mount": true,
+  "runner_sha256": "eb7c2169d5899aacb77c6b8f615d494a4686e0007e342cb5f6edfc842dba20ca"
+}

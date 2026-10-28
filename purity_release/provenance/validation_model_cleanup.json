@@ -1,0 +1,202 @@
+{
+  "schema_version": 1,
+  "status": "passed",
+  "checked_utc": "2026-09-10T20:11:07.247490+00:00",
+  "scope": "Independent subprocess checks of pre-cleanup snapshot versus current release; exact selected checkpoint, CPU train mode, two original pie fixture events and two original Michel fixture events per model. Fixed profile environment before any model imports.",
+  "comparison": {
+    "rtol": 0,
+    "atol": 0,
+    "equal_nan": true,
+    "seed_before_constructor": 0,
+    "seed_before_each_forward": 0,
+    "torch_threads": 2
+  },
+  "before_snapshot": [
+    {
+      "file": "src/purity/models.py",
+      "sha256": "cb0456c4615a625265c54ae98290df2084f6a92f8e9e6df9e20e6aa4ef0d9a6b"
+    },
+    {
+      "file": "src/purity/models_v2.py",
+      "sha256": "a439aeab03acc9cd37ad0a4090bde41314a4b377713d06a49232baddf8bb097c"
+    },
+    {
+      "file": "src/purity/models_tail.py",
+      "sha256": "8f5f316b5cda12cc6e7bcb3221abf8236c265f191fcb1c077ba589c4ec9bece3"
+    },
+    {
+      "file": "src/purity/dataset.py",
+      "sha256": "002c8821909635de023bc82cffe0d76ce0b1316427332396b158d1303798084b"
+    },
+    {
+      "file": "src/purity/__init__.py",
+      "sha256": "bed1fdf9bbe518c78e1a48991f2f092373f0a74ac2ef05feb6cf5c14a2e86a13"
+    },
+    {
+      "file": "configs/tail10_ep10.json",
+      "sha256": "aca4cf28d3ef82629952fd9d117ba7d661fbd75ba2cdc02dc2c25c4836b8ba10"
+    },
+    {
+      "file": "examples/pie.parquet",
+      "sha256": "57f86351a2349646901074a3c32306647ada9fce750fec22b40a2411492467ff"
+    },
+    {
+      "file": "examples/michel.parquet",
+      "sha256": "c480ec6a947ed23a56c15d8a86d4a126ee87d1a1bf9b0a8f2de8debe999142c0"
+    },
+    {
+      "file": "configs/main_filmg2_ep19.json",
+      "sha256": "712f106ebcb73e607037136987de96ccc9c182fa09b1e048347eedcbaa88fe68"
+    },
+    {
+      "file": "src/purity/constants.py",
+      "sha256": "e9c6553ef659512d81c07f814e0457104d5a754088f3b9c3a0a67d59772b731f"
+    }
+  ],
+  "after_model_sources": [
+    {
+      "path": "src/purity/models/__init__.py",
+      "sha256": "a24b6cf3c69c66ecbf8b5193330f298885023a99971cce9ec438151e462b3877"
+    },
+    {
+      "path": "src/purity/models/layers.py",
+      "sha256": "97ea689e269adfaf662f97d6e61acefcbceb976ac2e6c3f3f030aef35482f7e1"
+    },
+    {
+      "path": "src/purity/models/main.py",
+      "sha256": "991b3f65066db0a1f249ca707b10f79c0502247c3d1af33fd776a80b52a9bbf8"
+    },
+    {
+      "path": "src/purity/models/tail.py",
+      "sha256": "8a10f0ee28b98f7f84f52f4532252a17179729f0f9ddbb8a078a50335e8254af"
+    }
+  ],
+  "models": {
+    "main": {
+      "before_class": "purity.models_v2.PURITYHybridModelV2",
+      "after_class": "purity.models.main.PURITYModel",
+      "checkpoint_sha256": "89af5f93661aa38e2788530dd94b0a694be5165ab5d9719437a16a9793428f97",
+      "strict_checkpoint_load": "passed on both",
+      "profile_environment": {
+        "PURITY_GATE_MODE": "best_xy",
+        "PURITY_BEST_XY_BETA": "0.5",
+        "PURITY_ROLE_FILM": "1",
+        "PURITY_ENERGY_TIME_GATE_NS": "5.0",
+        "PURITY_MAX_HITS": "250"
+      },
+      "constructor_kwargs": {
+        "dropout": 0.0
+      },
+      "state_dict": {
+        "keys": 392,
+        "key_order": "exact",
+        "shapes_dtypes_and_tensor_bytes": "exact",
+        "tensor_elements": 9806509,
+        "digest": "a54a5a50189a7d63ccb6224378136ce0410990afaee6976912c01b3bd4b2d94c"
+      },
+      "initialization": {
+        "seeded_tensor_bytes": "exact",
+        "state_dict_digest": "a89e9619a2ddaebd8ad2ee5295cfae04740cbebdc3acdd62134e852a221940e6",
+        "post_constructor_rng_sha256": "f8a3af7678dd4a0ede23e8814994622896d886f9135828762599e7849dbc18b9",
+        "named_module_order": "exact",
+        "named_module_types": "exact except intentional public root-class rename",
+        "modules": 389
+      },
+      "cases": {
+        "pie": {
+          "rows": 2,
+          "result": "exact",
+          "input_tensors": 44,
+          "input_elements": 6565,
+          "output_tensors": 39,
+          "output_elements": 31470,
+          "other_output_values": 3
+        },
+        "michel": {
+          "rows": 2,
+          "result": "exact",
+          "input_tensors": 44,
+          "input_elements": 4527,
+          "output_tensors": 39,
+          "output_elements": 24017,
+          "other_output_values": 3
+        }
+      },
+      "torch": "2.7.0+cu128",
+      "python": "3.11.12 | packaged by conda-forge | (main, Apr 10 2025, 22:23:25) [GCC 13.3.0]"
+    },
+    "tail": {
+      "before_class": "purity.models_tail.PURITYTailModel",
+      "after_class": "purity.models.tail.PURITYTailModel",
+      "checkpoint_sha256": "6ed827b9707f7f5a4b35dabba8117d95a0766309baded74632ebaae654d651ce",
+      "strict_checkpoint_load": "passed on both",
+      "profile_environment": {},
+      "constructor_kwargs": {
+        "dropout": 0.05
+      },
+      "state_dict": {
+        "keys": 421,
+        "key_order": "exact",
+        "shapes_dtypes_and_tensor_bytes": "exact",
+        "tensor_elements": 7379107,
+        "digest": "a11ef398fc4d17a4cf33f356ffc774bb2c47dc93cbf2e69457312c00cc7f0be5"
+      },
+      "initialization": {
+        "seeded_tensor_bytes": "exact",
+        "state_dict_digest": "82baaa447e55260fd7d52efb4a5bd2d232cc1488af8915b5a5d214254882fb13",
+        "post_constructor_rng_sha256": "59ee1cf7509d4c7bd479f872a40ba2aa780a9495f44b4f32c8d9b1249056d99d",
+        "named_module_order": "exact",
+        "named_module_types": "exact except intentional public root-class rename",
+        "modules": 426
+      },
+      "cases": {
+        "pie": {
+          "rows": 2,
+          "result": "exact",
+          "input_tensors": 44,
+          "input_elements": 6565,
+          "output_tensors": 30,
+          "output_elements": 102175,
+          "other_output_values": 3
+        },
+        "michel": {
+          "rows": 2,
+          "result": "exact",
+          "input_tensors": 44,
+          "input_elements": 4527,
+          "output_tensors": 30,
+          "output_elements": 66445,
+          "other_output_values": 3
+        }
+      },
+      "torch": "2.7.0+cu128",
+      "python": "3.11.12 | packaged by conda-forge | (main, Apr 10 2025, 22:23:25) [GCC 13.3.0]"
+    }
+  },
+  "limitations": [
+    "CPU bounded fixture comparison; not a full-cohort benchmark or GPU-kernel equivalence claim.",
+    "Preserves initialization and inference for the selected main FiLM/timegate profile and selected tail dropout profile; alternate historical architecture/environment variants are outside this cleanup check."
+  ],
+  "final_descriptive_cleanup_verification": {
+    "checked_utc": "2026-09-10T20:17:37.538623+00:00",
+    "result": "passed",
+    "comparison": "Full executable module ASTs ignoring descriptive docstrings/comments. Final main maps exactly to snapshotted original used in numeric comparison after the declared base-constructor flattening, public class rename and shared-layer import move; final tail maps exactly after only the shared-layer import move.",
+    "main_and_tail_executable_asts": "exact under the already-validated structural refactor",
+    "shared_layers_and_lazy_exports": "byte-identical to source hashes recorded by numerical validation",
+    "numerical_rerun_required": false,
+    "previous_validated_source_hashes": {
+      "src/purity/models/__init__.py": "a24b6cf3c69c66ecbf8b5193330f298885023a99971cce9ec438151e462b3877",
+      "src/purity/models/layers.py": "97ea689e269adfaf662f97d6e61acefcbceb976ac2e6c3f3f030aef35482f7e1",
+      "src/purity/models/main.py": "fe49be4939dca89d2139903666e1ecbcac8b6e057a00b39db9760f916a767e11",
+      "src/purity/models/tail.py": "e5f686547f2ce3db7952a05f933249dd94ce972243a881c329e861cdff6ede78"
+    },
+    "main_config": {
+      "result": "same physics/inference settings",
+      "only_changes": [
+        "model_class: PURITYHybridModelV2 -> PURITYModel",
+        "removed inference.model_version: v2"
+      ],
+      "current_sha256": "b3a69c5ff7f9387d3131987e778047b08e7cd8f5d98970aa7140cdf60fb1c74c"
+    }
+  }
+}

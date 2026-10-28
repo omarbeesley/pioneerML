@@ -1,0 +1,160 @@
+{
+  "schema_version": 1,
+  "audited_on": "2026-09-10",
+  "scope": "Executable data preparation from supplied PIONEER ROOT files through mixed and origin-resliced model inputs, with frozen benchmark-table concatenation.",
+  "exports": [
+    {
+      "export": "src/purity/preprocessing/root_to_parquet.py",
+      "source": {
+        "path": "/home/obeesley/pioneerML/unified_reco/root_to_parquet.py",
+        "bytes": 43448,
+        "sha256": "5146ebfc32c0eb3203a9ca6a9698e9c08a19bf04a557bdd8b28a262e1b3baabd"
+      },
+      "export_sha256": "e11a31b8533640398d14e95ca14dc0483ebffedaf28ad6d89518141f3b166579"
+    },
+    {
+      "export": "src/purity/preprocessing/pileup_mixer.py",
+      "source": {
+        "path": "/home/obeesley/pioneerML/unified_reco/pileup_mixer.py",
+        "bytes": 52551,
+        "sha256": "14447dd72ad7db604c3cf09c7c190f4aa123712728db809a781b8824c3a2be4a"
+      },
+      "export_sha256": "15d060cb82819ecc30836677a0338d56cfa4787ff0646f381c62c7661e400a54"
+    },
+    {
+      "export": "src/purity/preprocessing/generate_tail_reveal.py",
+      "source": {
+        "path": "/home/obeesley/pioneerML/unified_reco/generate_tail_reveal.py",
+        "bytes": 16735,
+        "sha256": "34d8ed916b39169ec6178368c723ad7e6be81bdcab9e9abef145b4a40a8594ab"
+      },
+      "export_sha256": "fc428a81e44578701d3c42cd0f3aefaf26d35bb1d07bd8e1002fe133415630c1"
+    },
+    {
+      "export": "src/purity/preprocessing/generate_benchmarks.py",
+      "source": {
+        "path": "/home/obeesley/pioneerML/unified_reco/generate_benchmarks.py",
+        "bytes": 7544,
+        "sha256": "89a9c5fe3016f4965e3c94b1850f95a329b243836b5e490d76336e838527cc09"
+      },
+      "export_sha256": "15757d18dc15d083bac785bc7f54047630db66f1620e0d5886c7c300850862a1"
+    },
+    {
+      "export": "src/purity/preprocessing/generate_unmixed.py",
+      "source": {
+        "path": "/home/obeesley/pioneerML/unified_reco/generate_unmixed.py",
+        "bytes": 5385,
+        "sha256": "16f0118c1a74a62e692a923a6ce66432c0796565a6bca55f91c3f24001f778fe"
+      },
+      "export_sha256": "315c7d60163c4a24aa1c2af4fb47ab647dc1d338dbd18365670edaf994cad687"
+    },
+    {
+      "export": "src/purity/preprocessing/apply_fast3_response.py",
+      "source": {
+        "path": "/home/obeesley/pioneerML/unified_reco/apply_fast3_response.py",
+        "bytes": 11053,
+        "sha256": "380a66255991dc0fb87cc0e4a65f38aa0c6b148c41b55f963f78094538113714"
+      },
+      "export_sha256": "590b962924d3f7984a11c73200616ee4ccfeaa967be2d3d132b952fddf9836dd"
+    },
+    {
+      "export": "src/purity/preprocessing/origin_reslice.py",
+      "source": {
+        "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/origin_reslice.py",
+        "bytes": 1301,
+        "sha256": "8dae219873820eefc580a2e0e6c0085b101a4e3e479bc9dbbe707573972d484e"
+      },
+      "export_sha256": "ef86bd4e61218c0cbc9fceb0a789dc1aa024f6799fbb0971704e77fb202dade6"
+    },
+    {
+      "export": "src/purity/preprocessing/assemble_pool.py",
+      "source": {
+        "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/michel_shard_concat.py",
+        "bytes": 667,
+        "sha256": "a4caf5a141059f41497fe74f72413c2973e1b6ba066398b7b8a5c830d5b903d9"
+      },
+      "export_sha256": "9bfe942d35c37d61c364294924b28241f96fa36655eab681261e3dadf6dab3f6"
+    },
+    {
+      "export": "src/purity/final_analysis/combine_events.py",
+      "source": {
+        "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/scratch_pipeline/build_fl2_combined.py",
+        "bytes": 2263,
+        "sha256": "7c5ed9309138458c8bd7b4136b90bf549304d29788a137b1a7ef86f8f40b03f1"
+      },
+      "export_sha256": "7cdafd46b1161563550bdeba934bdbb6acffd8a4494f78fe00d679ad632d862d"
+    }
+  ],
+  "assets": [
+    {
+      "export": "assets/luts/crystalLUT.npy",
+      "source": {
+        "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/crystalLUT.npy",
+        "bytes": 8528,
+        "sha256": "4220e82fe5f9269d868fe13b02f08d0851db915379686e0cb22668c48ee38550"
+      },
+      "export_sha256": "4220e82fe5f9269d868fe13b02f08d0851db915379686e0cb22668c48ee38550"
+    },
+    {
+      "export": "assets/luts/validLUT.npy",
+      "source": {
+        "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/validLUT.npy",
+        "bytes": 2616,
+        "sha256": "13f68d0058658151792c9a5b46df2fa86b9069099ee7a6dfa538c050fd17cf28"
+      },
+      "export_sha256": "13f68d0058658151792c9a5b46df2fa86b9069099ee7a6dfa538c050fd17cf28"
+    }
+  ],
+  "fixtures": "provenance/preprocessing_fixtures.json",
+  "validation": "provenance/validation_preprocessing.json",
+  "required_non_root_dependencies": [
+    "numpy",
+    "pandas",
+    "pyarrow",
+    "tqdm"
+  ],
+  "optional_conversion_dependencies": [
+    "PyROOT",
+    "PIONEER ROOT event dictionaries and geometry/runtime environment"
+  ],
+  "portable_commands": [
+    "python -m purity.preprocessing.root_to_parquet",
+    "python -m purity.preprocessing.generate_unmixed",
+    "python -m purity.preprocessing.assemble_pool",
+    "python -m purity.preprocessing.generate_tail_reveal",
+    "python -m purity.preprocessing.pileup_mixer",
+    "python -m purity.preprocessing.origin_reslice",
+    "python -m purity.preprocessing.apply_fast3_response",
+    "python -m purity.preprocessing.generate_benchmarks",
+    "python -m purity.final_analysis.combine_events"
+  ],
+  "portability_changes": [
+    "Replaced machine-specific data/output/LUT defaults with required CLI arguments and package-relative imports.",
+    "PyROOT loaded only inside converter operations; safe import and --help without ROOT.",
+    "Explicit main functions and guards for all CLIs; no jobs run on import.",
+    "Outputs and manifest paths checked before work; successful commands write filenames/sizes/settings/module-hash provenance.",
+    "Zero-progress mixing raises an error instead of looping forever when source pools produce no eligible events.",
+    "Origin reslicing streams batches while preserving dense sorted origin/slice labels and energy-weighted times; checks aligned ragged-array lengths.",
+    "Combination streams selected shards with strict column-set/type preflight and no silently skipped schema mismatches.",
+    "Grouped source-pool assembly generalizes the sorted index*files_per_pool slicing rule, default 14 files per pool.",
+    "Unmixed wrapper exposes --no_shuffle_files and --keep_untriggered_michel; neither changes the archived default unless selected.",
+    "Direct mixer additionally exposes physical pileup rate, calo-only rate, radiative-donor removal, and no-replacement flags already supported by its class."
+  ],
+  "scientific_behavior_preserved": {
+    "generator_effective_seed": "(CLI seed + sum(ord(c) for c in job_name)) & 0xFFFFFFFF",
+    "generator_seed_with_none": "uses unseeded NumPy state, preserving original behavior; supply a seed for repeatable new production",
+    "no_replace_scope": "each generate_batch call only; permutations reset across chunks",
+    "origin_reslicing": "original_slice * 100000 + origin + 10, then np.unique(..., return_inverse=True)",
+    "root_parallel_event_limit": "ceil(max_events/nprocs) per worker; global total may differ from requested max",
+    "fast3_status": "optional historical transform; not inserted into final fl2 production",
+    "standard_benchmark_status": "historical four-job recipe, not final fl2; use generate_tail_reveal for final recipe"
+  },
+  "external_requirements": {
+    "simulation": "G4Pioneer binary, macros/geometry, physics configuration, and ROOT files must be supplied; not generated or bundled by this release.",
+    "source_split": "Preexisting channel/train-val-eval directories consumed; complete historical source-file split manifest not recovered.",
+    "historical_inputs": "Only first 20 final Michel mixed-input tasks retained by original launcher; regenerated samples require exact source pools, seeds, chunk sizes and code snapshot.",
+    "cross_model_joins": "Source event IDs alone are not globally unique across source files and mixing realizations; validate shard/row identity explicitly."
+  },
+  "full_root_conversion_validated": false,
+  "full_production_regeneration_validated": false
+}

@@ -1,0 +1,38 @@
+{
+  "status": "passed",
+  "scope": "Original versus exported time fit on synthetic event summaries; not thesis performance reproduction.",
+  "input_rows_per_pool": 12000,
+  "synthetic_pie_event_weight": 0.05,
+  "synthetic_weight_note": "Amplified synthetic signal exercises positive NNLS pion and muon amplitudes; it is not the physical branching ratio.",
+  "synthetic_seed": 193,
+  "gaussian_toy_seed": 11,
+  "gaussian_toys_per_energy_bin": 1500,
+  "comparison": "Exact equality of every central fit histogram, yields, efficiencies, weighted errors, Gaussian-toy errors and closure metrics.",
+  "checked_metric_groups": [
+    "selected_pie_tail_fraction",
+    "fit_region_truth",
+    "fit_region_fitted",
+    "weighted_histogram_errors",
+    "historical_toy_yield_errors",
+    "measurement",
+    "closure_percent_after_tail_correction",
+    "historical_statistical_error_percentage_points",
+    "historical_anchor_error_percentage_points",
+    "low_bin_fractional_slope"
+  ],
+  "rtol": 0,
+  "atol": 0,
+  "original_source_sha256": "cea46c8e1cda4738bb44081764fa1ee7756f213e4bf77352d627c5b4c6ad4c26",
+  "export_source_sha256": "ac06522e0f8187877c8170d478b1304c29f1b1c8cc4c722130644107897bf763",
+  "isolated_cli": {
+    "status": "passed",
+    "inputs": "32 synthetic event-summary rows per pool",
+    "original_repository_mounted": false,
+    "output_files": [
+      "fig8_time_fit_fixed.json",
+      "fig8_time_fit_fixed.pdf",
+      "fig8_time_fit_fixed.png"
+    ],
+    "scientific_interpretation": "Plumbing check only; sparse synthetic fit values are not performance results."
+  }
+}
