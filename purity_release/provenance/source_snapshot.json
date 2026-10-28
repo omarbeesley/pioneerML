@@ -1,111 +1,117 @@
 {
-  "source_repository_head": "6cee4b2088b1246828466559db0263b04541dfc6",
-  "source_is_dirty": true,
-  "note": "Snapshot of working files, including uncommitted research fixes. Destination hashes in release_manifest.json reflect additional explicitly documented export fixes.",
-  "files": [
-    {
-      "source": "unified_reco/constants.py",
-      "source_sha256": "e9c6553ef659512d81c07f814e0457104d5a754088f3b9c3a0a67d59772b731f",
-      "destination": "src/purity/constants.py",
-      "transformations": [
-        "Package imports unified_reco -> purity; models_v2 imports made absolute; removed sys.path bootstrap; measurement package renamed."
-      ]
-    },
-    {
-      "source": "unified_reco/models.py",
-      "source_sha256": "63d901b8529b911e84ba5657c57aaf9f7619b3fbffa4edcb72f16e0f66fdc462",
-      "transformations": [
-        "Package imports unified_reco -> purity; models_v2 imports made absolute; removed sys.path bootstrap; measurement package renamed.",
-        "Keep shared layers and constructor initialization; remove the obsolete V1 forward. Main constructor is composed directly in original initialization order."
-      ],
-      "destinations": [
-        "src/purity/models/layers.py",
-        "src/purity/models/main.py"
-      ]
-    },
-    {
-      "source": "unified_reco/models_v2.py",
-      "source_sha256": "3c6326a198e6a49cb6665b9729baad39f1cca077b4d4629341aac5b0fea1f918",
-      "destination": "src/purity/models/main.py",
-      "transformations": [
-        "Package imports unified_reco -> purity; models_v2 imports made absolute; removed sys.path bootstrap; measurement package renamed.",
-        "Rename selected architecture PURITYModel, deriving directly from nn.Module; incorporate base initialization and preserve active forward calculations."
-      ]
-    },
-    {
-      "source": "unified_reco/models_tail.py",
-      "source_sha256": "f6634033050427424404ebf9601377ee822ac3ac9a71c185dcdd2b6aae85f73a",
-      "destination": "src/purity/models/tail.py",
-      "transformations": [
-        "Package imports unified_reco -> purity; models_v2 imports made absolute; removed sys.path bootstrap; measurement package renamed.",
-        "Move tail model into models package; import shared definitions from models.layers."
-      ]
-    },
-    {
-      "source": "unified_reco/dataset.py",
-      "source_sha256": "6aa02ebf74d47c51c985c16378b35aa68e61ea793b3c348033c418891624d493",
-      "destination": "src/purity/dataset.py",
-      "transformations": [
-        "Package imports unified_reco -> purity; models_v2 imports made absolute; removed sys.path bootstrap; measurement package renamed."
-      ]
-    },
-    {
-      "source": "unified_reco/benchmark.py",
-      "source_sha256": "0e4431670927d5500cc2a75e10cfc0b9ba4696612bbf4699775a043ed5cf9c73",
-      "destination": "src/purity/benchmark.py",
-      "transformations": [
-        "Package imports unified_reco -> purity; models_v2 imports made absolute; removed sys.path bootstrap; measurement package renamed.",
-        "Use only PURITYModel; remove the obsolete V1 branch and --model_version option."
-      ]
-    },
-    {
-      "source": "unified_reco/eval_tail.py",
-      "source_sha256": "9aea2913dafad7477eabbcc721a25f32623c5c838cba58b7b86d2105393eb012",
-      "destination": "src/purity/eval_tail.py",
-      "transformations": [
-        "Package imports unified_reco -> purity; models_v2 imports made absolute; removed sys.path bootstrap; measurement package renamed."
-      ]
-    },
-    {
-      "source": "unified_reco/train_utils.py",
-      "source_sha256": "d1671b05ca6aed8e5fbc6243a7394c3b63219ec38fbb2dbbf196be1463aeefdd",
-      "destination": "src/purity/train_utils.py",
-      "transformations": [
-        "Package imports unified_reco -> purity; models_v2 imports made absolute; removed sys.path bootstrap; measurement package renamed."
-      ]
-    },
-    {
-      "source": "unified_reco/purity_analysis/__init__.py",
-      "source_sha256": "d45182c344a559fc3bb9b4bcd040818ddabde589c0378378a9a46c429efdd85b",
-      "destination": "src/purity/measurement/__init__.py",
-      "transformations": [
-        "Package imports unified_reco -> purity; models_v2 imports made absolute; removed sys.path bootstrap; measurement package renamed."
-      ]
-    },
-    {
-      "source": "unified_reco/purity_analysis/io.py",
-      "source_sha256": "2e2c66fb42baa67fa7f111879e3964e83714250ea5f0f9a5d7625b1b5b768b59",
-      "destination": "src/purity/measurement/io.py",
-      "transformations": [
-        "Package imports unified_reco -> purity; models_v2 imports made absolute; removed sys.path bootstrap; measurement package renamed."
-      ]
-    },
-    {
-      "source": "unified_reco/purity_analysis/measurement.py",
-      "source_sha256": "0f101096c1a451fc3c11c7b614d02d673d1539df81b758caa2fd1eef91943ea8",
-      "destination": "src/purity/measurement/measurement.py",
-      "transformations": [
-        "Package imports unified_reco -> purity; models_v2 imports made absolute; removed sys.path bootstrap; measurement package renamed."
-      ]
-    },
-    {
-      "source": "unified_reco/purity_analysis/run_analysis.py",
-      "source_sha256": "759bde809762216bedcc4bc0bfba5fe0e60e19c24515d024a405b61adb3b7818",
-      "destination": "src/purity/measurement/run_analysis.py",
-      "transformations": [
-        "Package imports unified_reco -> purity; models_v2 imports made absolute; removed sys.path bootstrap; measurement package renamed."
-      ]
-    }
-  ],
-  "model_consolidation_validation": "provenance/validation_model_cleanup.json"
+ "source_repository_head": "6cee4b2088b1246828466559db0263b04541dfc6",
+ "source_is_dirty": true,
+ "note": "Snapshot of working files, including uncommitted research fixes. Destination hashes in release_manifest.json reflect additional explicitly documented export fixes.",
+ "files": [
+  {
+   "source": "unified_reco/constants.py",
+   "source_sha256": "e9c6553ef659512d81c07f814e0457104d5a754088f3b9c3a0a67d59772b731f",
+   "destination": "src/purity/constants.py",
+   "transformations": [
+    "Package imports unified_reco -> purity; models_v2 imports made absolute; removed sys.path bootstrap; measurement package renamed."
+   ]
+  },
+  {
+   "source": "unified_reco/models.py",
+   "source_sha256": "63d901b8529b911e84ba5657c57aaf9f7619b3fbffa4edcb72f16e0f66fdc462",
+   "transformations": [
+    "Package imports unified_reco -> purity; models_v2 imports made absolute; removed sys.path bootstrap; measurement package renamed.",
+    "Keep shared layers and constructor initialization; remove the obsolete V1 forward. Main constructor is composed directly in original initialization order."
+   ],
+   "destinations": [
+    "src/purity/models/layers.py",
+    "src/purity/models/main.py"
+   ]
+  },
+  {
+   "source": "unified_reco/models_v2.py",
+   "source_sha256": "3c6326a198e6a49cb6665b9729baad39f1cca077b4d4629341aac5b0fea1f918",
+   "destination": "src/purity/models/main.py",
+   "transformations": [
+    "Package imports unified_reco -> purity; models_v2 imports made absolute; removed sys.path bootstrap; measurement package renamed.",
+    "Rename selected architecture PURITYModel, deriving directly from nn.Module; incorporate base initialization and preserve active forward calculations."
+   ]
+  },
+  {
+   "source": "unified_reco/models_tail.py",
+   "source_sha256": "f6634033050427424404ebf9601377ee822ac3ac9a71c185dcdd2b6aae85f73a",
+   "destination": "src/purity/models/tail.py",
+   "transformations": [
+    "Package imports unified_reco -> purity; models_v2 imports made absolute; removed sys.path bootstrap; measurement package renamed.",
+    "Move tail model into models package; import shared definitions from models.layers."
+   ]
+  },
+  {
+   "source": "unified_reco/dataset.py",
+   "source_sha256": "6aa02ebf74d47c51c985c16378b35aa68e61ea793b3c348033c418891624d493",
+   "destination": "src/purity/dataset.py",
+   "transformations": [
+    "Package imports unified_reco -> purity; models_v2 imports made absolute; removed sys.path bootstrap; measurement package renamed."
+   ]
+  },
+  {
+   "source": "unified_reco/benchmark.py",
+   "source_sha256": "0e4431670927d5500cc2a75e10cfc0b9ba4696612bbf4699775a043ed5cf9c73",
+   "destination": "src/purity/benchmark.py",
+   "transformations": [
+    "Package imports unified_reco -> purity; models_v2 imports made absolute; removed sys.path bootstrap; measurement package renamed.",
+    "Use only PURITYModel; remove the obsolete V1 branch and --model_version option."
+   ]
+  },
+  {
+   "source": "unified_reco/eval_tail.py",
+   "source_sha256": "9aea2913dafad7477eabbcc721a25f32623c5c838cba58b7b86d2105393eb012",
+   "destination": "src/purity/eval_tail.py",
+   "transformations": [
+    "Package imports unified_reco -> purity; models_v2 imports made absolute; removed sys.path bootstrap; measurement package renamed."
+   ]
+  },
+  {
+   "source": "unified_reco/train_utils.py",
+   "source_sha256": "d1671b05ca6aed8e5fbc6243a7394c3b63219ec38fbb2dbbf196be1463aeefdd",
+   "destination": "src/purity/train_utils.py",
+   "transformations": [
+    "Package imports unified_reco -> purity; models_v2 imports made absolute; removed sys.path bootstrap; measurement package renamed."
+   ]
+  },
+  {
+   "source": "unified_reco/purity_analysis/__init__.py",
+   "source_sha256": "d45182c344a559fc3bb9b4bcd040818ddabde589c0378378a9a46c429efdd85b",
+   "destination": "src/purity/measurement/__init__.py",
+   "transformations": [
+    "Package imports unified_reco -> purity; models_v2 imports made absolute; removed sys.path bootstrap; measurement package renamed."
+   ]
+  },
+  {
+   "source": "unified_reco/purity_analysis/io.py",
+   "source_sha256": "2e2c66fb42baa67fa7f111879e3964e83714250ea5f0f9a5d7625b1b5b768b59",
+   "destination": "src/purity/measurement/io.py",
+   "transformations": [
+    "Package imports unified_reco -> purity; models_v2 imports made absolute; removed sys.path bootstrap; measurement package renamed."
+   ]
+  },
+  {
+   "source": "unified_reco/purity_analysis/measurement.py",
+   "source_sha256": "0f101096c1a451fc3c11c7b614d02d673d1539df81b758caa2fd1eef91943ea8",
+   "destination": "src/purity/measurement/measurement.py",
+   "transformations": [
+    "Package imports unified_reco -> purity; models_v2 imports made absolute; removed sys.path bootstrap; measurement package renamed."
+   ]
+  },
+  {
+   "source": "unified_reco/purity_analysis/run_analysis.py",
+   "source_sha256": "759bde809762216bedcc4bc0bfba5fe0e60e19c24515d024a405b61adb3b7818",
+   "destination": "src/purity/measurement/run_analysis.py",
+   "transformations": [
+    "Package imports unified_reco -> purity; models_v2 imports made absolute; removed sys.path bootstrap; measurement package renamed."
+   ]
+  }
+ ],
+ "model_consolidation_validation": "provenance/validation_model_cleanup.json",
+ "source_committed_in": {
+  "commit": "843a97f",
+  "branch": "lyso_etotal_fix_clean",
+  "date": "2026-10-28",
+  "note": "The dirty working-tree files recorded above were committed unchanged; every source_sha256 matched at commit time."
+ }
 }

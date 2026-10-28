@@ -165,8 +165,8 @@
     },
     {
       "file": "provenance/source_snapshot.json",
-      "bytes": 5521,
-      "sha256": "be16c0a822e02c8acf3a5bf35b97e407812249211372f5f7901ddc3fe05839b0"
+      "bytes": 5451,
+      "sha256": "fab89f11a610d7d3f023b10ce5fe16148b4f3eb0a00d5252ce31de24030d701d"
     },
     {
       "file": "provenance/standalone_audit.json",
