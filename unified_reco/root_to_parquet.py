@@ -110,6 +110,10 @@ PARQUET_NAMES = [
     'truth_positron_start_x', 'truth_positron_start_y', 'truth_positron_start_z',
     'truth_positron_stop_x', 'truth_positron_stop_y', 'truth_positron_stop_z',
     'atar_x', 'atar_y', 'atar_z', 'atar_t', 'atar_truth_t', 'atar_E', 'atar_view', 'atar_pdg', 'atar_slice_id',
+    # ATAR positions: atar_x/y/z are what the strips measure (strip centre in the
+    # measured coordinate, 0 in the unmeasured one, plane centre in z); the
+    # energy-weighted Geant4 deposit centroid is kept as truth in atar_truth_x/y/z.
+    'atar_truth_x', 'atar_truth_y', 'atar_truth_z',
     'lyso_x', 'lyso_y', 'lyso_z', 'lyso_t', 'lyso_E', 'lyso_pdg',
     'dead_E',
     'atar_posE',
@@ -140,6 +144,7 @@ PARQUET_TYPES['event_id'] = pa.int64()
 PARQUET_TYPES['event_type'] = pa.int64()
 PARQUET_TYPES['dtar_triggered'] = pa.int64()
 for _c in ('atar_x', 'atar_y', 'atar_z', 'atar_t', 'atar_truth_t', 'atar_E',
+           'atar_truth_x', 'atar_truth_y', 'atar_truth_z',
            'lyso_x', 'lyso_y', 'lyso_z', 'lyso_t', 'lyso_E'):
     PARQUET_TYPES[_c] = _LIST_F64
 for _c in ('atar_view', 'atar_pdg', 'atar_slice_id', 'lyso_pdg'):
@@ -172,6 +177,9 @@ def process_root_file(file_list, geoheader, output_file, max_events=None, shard_
     if seed is not None:
         np.random.seed(seed & 0xFFFFFFFF)
         print(f"Seeded numpy RNG with {seed & 0xFFFFFFFF} (smearing is reproducible)")
+    # Static ATAR strip geometry (view, measured x, measured y, plane z) by volume id,
+    # looked up once per strip rather than per hit.
+    atar_strip_geo = {}
 
     chain = ROOT.TChain("sim")
     if isinstance(file_list, str):
@@ -483,6 +491,9 @@ def process_root_file(file_list, geoheader, output_file, max_events=None, shard_
                             hit['x'] = hit['x'] * f_old + new_hit['x'] * f_new
                             hit['y'] = hit['y'] * f_old + new_hit['y'] * f_new
                             hit['z'] = hit['z'] * f_old + new_hit['z'] * f_new
+                            for k in ('truth_x', 'truth_y', 'truth_z'):
+                                if k in hit:
+                                    hit[k] = hit[k] * f_old + new_hit[k] * f_new
                             hit['truth_t'] = hit['truth_t'] * f_old + new_hit['truth_t'] * f_new
                             # Energy-weight the smeared time too. Was previously
                             # frozen as the first-in track's smeared time, which
@@ -505,9 +516,21 @@ def process_root_file(file_list, geoheader, output_file, max_events=None, shard_
                 if is_atar_lookup[idx]:
                     # Derive view from GeoHeader rotation: unrotated (psi≈0) → XZ (0),
                     # rotated (psi≈-π/4) → YZ (1). Replaces old AtarHeader.GetChannel().
-                    strip_orientation = 0 if abs(geoheader.GetPsi(v_id)) < 0.1 else 1
-                    
-                    new_hit = {'x': float(ax), 'y': float(ay), 'z': float(az), 't': max(float(at), 0.05), 'truth_t': max(float(truth_t[idx]), 0.05), 'E': float(se), 'view': int(strip_orientation), 'pdg_mask': pdg_mask}
+                    if v_id not in atar_strip_geo:
+                        view = 0 if abs(geoheader.GetPsi(v_id)) < 0.1 else 1
+                        # A strip measures one transverse coordinate (x for view 0, y for
+                        # view 1) to its centre, and z to its plane's centre; the other
+                        # transverse coordinate is not measured and is stored as 0.
+                        atar_strip_geo[v_id] = (
+                            view,
+                            float(geoheader.GetX(v_id)) if view == 0 else 0.0,
+                            float(geoheader.GetY(v_id)) if view == 1 else 0.0,
+                            float(geoheader.GetZ(v_id)))
+                    strip_orientation, mx, my, mz = atar_strip_geo[v_id]
+
+                    new_hit = {'x': mx, 'y': my, 'z': mz,
+                               'truth_x': float(ax), 'truth_y': float(ay), 'truth_z': float(az),
+                               't': max(float(at), 0.05), 'truth_t': max(float(truth_t[idx]), 0.05), 'E': float(se), 'view': int(strip_orientation), 'pdg_mask': pdg_mask}
                     if v_id not in event_hits_atar: event_hits_atar[v_id] = []
                     merge_hit(event_hits_atar[v_id], new_hit, merge_window=2.0)
                     
@@ -564,11 +587,15 @@ def process_root_file(file_list, geoheader, output_file, max_events=None, shard_
 
         # 5. Flatten Merged Hits into Event Lists & Calculate Time Slices
         evt_atar_x, evt_atar_y, evt_atar_z, evt_atar_E, evt_atar_t, evt_atar_truth_t, evt_atar_view, evt_atar_pdg = [], [], [], [], [], [], [], []
+        evt_atar_truth_x, evt_atar_truth_y, evt_atar_truth_z = [], [], []
         for v_id, hits in event_hits_atar.items():
             for h in hits:
                 evt_atar_x.append(h['x'])
                 evt_atar_y.append(h['y'])
                 evt_atar_z.append(h['z'])
+                evt_atar_truth_x.append(h['truth_x'])
+                evt_atar_truth_y.append(h['truth_y'])
+                evt_atar_truth_z.append(h['truth_z'])
                 evt_atar_t.append(h['t'])
                 evt_atar_truth_t.append(h['truth_t'])
                 evt_atar_E.append(h['E'])
@@ -653,6 +680,9 @@ def process_root_file(file_list, geoheader, output_file, max_events=None, shard_
         acc['atar_E'].append(evt_atar_E)
         acc['atar_t'].append(evt_atar_t)
         acc['atar_truth_t'].append(evt_atar_truth_t)
+        acc['atar_truth_x'].append(evt_atar_truth_x)
+        acc['atar_truth_y'].append(evt_atar_truth_y)
+        acc['atar_truth_z'].append(evt_atar_truth_z)
         acc['atar_view'].append(evt_atar_view)
         acc['atar_pdg'].append(evt_atar_pdg)
         acc['atar_slice_id'].append(evt_atar_slice)

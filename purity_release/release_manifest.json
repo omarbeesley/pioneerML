@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "created_utc": "2026-10-28T18:33:55.407499+00:00",
+  "created_utc": "2026-10-29T18:50:59.396177+00:00",
   "scope": "Self-contained directory handoff preserving the inspected current main and tail implementations, including changes newer than the thesis, with local selected checkpoints, preparation, analysis and plotting. Current-source parity and isolated workflow checks passed. Thesis Chapters 5-6 provide a historical figure/result map; exact thesis replay is distinct from benchmarking the released source and is not required to preserve newer improvements. 2026-10-28: trimmed to models, inference and benchmarks, data preparation, training, the R_e/mu analysis and the tail cut chain (thesis figure reproduction moved to ../thesis_reproduction/); added trainers, training-data recipes and launchers and a stable event key; checkpoints are weights-only copies. See provenance/changes_20261028.json.",
   "files": [
     {
@@ -10,8 +10,8 @@
     },
     {
       "file": "README.md",
-      "bytes": 5604,
-      "sha256": "7fbc298f3fda189898cad297cb0c9686345e717d002a8a4bf15a26b92eca60d0"
+      "bytes": 6162,
+      "sha256": "b20564f989308f83da25e2ea89067913bf39e1facf3feaa1b961e18256386fdc"
     },
     {
       "file": "assets/luts/crystalLUT.npy",
@@ -50,8 +50,8 @@
     },
     {
       "file": "docs/data_contract.md",
-      "bytes": 4458,
-      "sha256": "14cda1d3e1d9fc051fee8f34779ab2c9f31b85e370364de2d35413524908b01c"
+      "bytes": 5518,
+      "sha256": "00c6337e861ab250f4d5a0a4863a183d499cd4494cb336a018dbf70bd1723ef7"
     },
     {
       "file": "docs/data_preparation.md",
@@ -110,8 +110,8 @@
     },
     {
       "file": "provenance/changes_20261028.json",
-      "bytes": 13407,
-      "sha256": "efd50169c5d985f578b9ac855bbe0ca2e8414ef2fd5e8441e98d8728da6e510b"
+      "bytes": 13881,
+      "sha256": "a62dbd09b5c1b6bf533d9bb6f0d0f9558e95c7ac6afd0be8e6a55973146ba2bb"
     },
     {
       "file": "provenance/diagnostics_export.json",
@@ -192,6 +192,11 @@
       "file": "provenance/training_artifacts.json",
       "bytes": 19152,
       "sha256": "a49cbc2c42acaa123d4a507a906570a055a665901e89d11f990177ea1779c5b1"
+    },
+    {
+      "file": "provenance/validation_atar_strip_positions.json",
+      "bytes": 1299,
+      "sha256": "b4acac85fff3f9f98a534aacafd83157b605413adc8f9fc30695d8468d1f3063"
     },
     {
       "file": "provenance/validation_bias_vs_theta.json",
@@ -350,8 +355,8 @@
     },
     {
       "file": "src/purity/dataset.py",
-      "bytes": 34201,
-      "sha256": "e7e9d6b19aec8c6df5b90bc737fc0766941e6b110c083a9c4299b93607826517"
+      "bytes": 34551,
+      "sha256": "8fb861674731a870b1a0417ae8f3a6d39445867bc9c5d5d621034e4fcc4d70d3"
     },
     {
       "file": "src/purity/diagnostics/__init__.py",
@@ -590,13 +595,13 @@
     },
     {
       "file": "src/purity/preprocessing/pileup_mixer.py",
-      "bytes": 53624,
-      "sha256": "15d060cb82819ecc30836677a0338d56cfa4787ff0646f381c62c7661e400a54"
+      "bytes": 54118,
+      "sha256": "80bb12dede03593798d8a05947b37091af84ae611ba6f3ad289939a2003ad470"
     },
     {
       "file": "src/purity/preprocessing/root_to_parquet.py",
-      "bytes": 44430,
-      "sha256": "e11a31b8533640398d14e95ca14dc0483ebffedaf28ad6d89518141f3b166579"
+      "bytes": 46301,
+      "sha256": "d0269e84ad52d92eb14c3af8bb68f1c9ef989d3be7ffa99a7c6a5fe137fcc886"
     },
     {
       "file": "src/purity/train_utils.py",

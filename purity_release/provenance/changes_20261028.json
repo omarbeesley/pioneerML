@@ -249,5 +249,9 @@
    ".gitignore excludes bytecode under src/purity/diagnostics"
   ],
   "validation": "provenance/validation_weights_only.json"
+ },
+ "atar_strip_positions_20261029": {
+  "summary": "root_to_parquet writes measured ATAR positions (strip centre, plane centre, 0 for the unmeasured coordinate) in atar_x/y/z and the Geant4 deposit centroid in new atar_truth_x/y/z; pileup_mixer carries the truth columns (falling back to atar_x/y/z for older parquets); dataset slice-endpoint targets use the truth columns. Same change in unified_reco/.",
+  "validation": "provenance/validation_atar_strip_positions.json"
  }
 }

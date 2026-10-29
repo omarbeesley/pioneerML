@@ -108,6 +108,11 @@ def extract_hits(row, pdg_mask_keep, origin_val, dt_offset=0.0, exclude_mask=0):
         'x': np.array(row['atar_x'])[keep_atar].tolist(),
         'y': np.array(row['atar_y'])[keep_atar].tolist(),
         'z': np.array(row['atar_z'])[keep_atar].tolist(),
+        # Truth deposit centroids; parquets converted before they existed fall back
+        # to the stored positions.
+        'truth_x': np.array(row['atar_truth_x'] if 'atar_truth_x' in row else row['atar_x'])[keep_atar].tolist(),
+        'truth_y': np.array(row['atar_truth_y'] if 'atar_truth_y' in row else row['atar_y'])[keep_atar].tolist(),
+        'truth_z': np.array(row['atar_truth_z'] if 'atar_truth_z' in row else row['atar_z'])[keep_atar].tolist(),
         't': atar_t_shifted[keep_atar].tolist(),
         'truth_t': (np.array(row['atar_truth_t']) + dt_offset)[keep_atar].tolist() if 'atar_truth_t' in row else np.zeros(np.sum(keep_atar)).tolist(),
         'E': np.array(row['atar_E'])[keep_atar].tolist(),
@@ -477,7 +482,7 @@ class PileupMixer:
                 if _scalar_col in main_row:
                     out_row[_scalar_col] = float(main_row[_scalar_col])
             
-            atar_hits = {k: [] for k in ['x', 'y', 'z', 't', 'truth_t', 'E', 'view', 'pdg', 'slice_id', 'slice_mean_t', 'origin']}
+            atar_hits = {k: [] for k in ['x', 'y', 'z', 'truth_x', 'truth_y', 'truth_z', 't', 'truth_t', 'E', 'view', 'pdg', 'slice_id', 'slice_mean_t', 'origin']}
             lyso_hits = {k: [] for k in ['x', 'y', 'z', 't', 'E', 'pdg', 'slice_id', 'slice_mean_t', 'origin']}
             
             a_main, l_main = extract_hits(main_row, 0xFFFFFFFF, origin_val=0, dt_offset=0.0)

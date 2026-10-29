@@ -33,6 +33,14 @@ checkpoint. [Main model details](docs/main_model.md) and
 [tail model details](docs/tail_model.md) record their settings and history. The
 profiles in `configs/` pin the inference settings; use them.
 
+**ATAR positions.** Since 2026-10-29 the converter stores the measured strip
+position: strip centre, plane centre in z, 0 in the coordinate a strip does not
+measure. The Geant4 deposit centroid moved to `atar_truth_x/y/z`. Both selected
+checkpoints were trained on earlier samples whose `atar_x/y/z` held that continuous
+truth centroid, so their ATAR position resolutions are optimistic. Applying them to
+newly converted samples is out of their training distribution; retrain on reconverted
+samples for new results ([data contract](docs/data_contract.md)).
+
 ## Run
 
 The validated environment is the production `pytorch.sif` container; versions are

@@ -1,0 +1,16 @@
+{
+ "schema_version": 1,
+ "status": "passed",
+ "checked_utc": "2026-10-29",
+ "slurm_jobs": [
+  2286435,
+  2286436,
+  2286437
+ ],
+ "geometry": "PIMCGeoHelper GetX/GetY/GetZ = global strip centre (checked against 97,211 Geant4 ATAR steps in 200 pie events: |step - centre| <= 0.1 mm in the measured coordinate, <= 0.06 mm in z). Strips 0.2 mm wide, 0.2 mm pitch, 0.12 mm thick, 48 planes; view 0 (psi 0) measures x, view 1 (psi -pi/4) measures y.",
+ "conversion": "50 pie + 50 Michel events from omar_pipeline/root: measured coordinate on the 0.2 mm strip grid, unmeasured coordinate exactly 0, 48 distinct z, max |truth - measured| = 0.1 / 0.1 / 0.06 mm; release and unified_reco converters byte-identical in all ATAR arrays.",
+ "mixing_and_reslicing": "40 mixed events; atar_truth_x/y/z carried with the same length as atar_x; origin_reslice passes them through.",
+ "dataset": "Model input features identical with or without the truth columns; slice-endpoint targets differ in all 40 events (taken from the truth columns); 48 distinct ATAR z inputs.",
+ "inference": "Both pinned profiles ran on the resliced events (40/40).",
+ "consequence": "Both selected checkpoints were trained on continuous truth-centroid positions; reconversion and retraining are needed for results with measured positions."
+}

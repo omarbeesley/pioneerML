@@ -22,6 +22,22 @@ loader normalizes physical quantities for the models and the benchmark restores
 units for its output tables. Do not replace this loader with the older notebook
 or graph-record pipeline.
 
+ATAR positions are what the strips measure. Strips are 0.2 mm wide on a 0.2 mm
+pitch, in 48 planes 0.12 mm thick. For a view-0 strip `atar_x` is the strip centre
+and `atar_y` is 0; for a view-1 strip `atar_y` is the strip centre and `atar_x` is 0;
+`atar_z` is the plane centre. The energy-weighted Geant4 deposit centroid in the
+strip is kept as truth in `atar_truth_x`, `atar_truth_y` and `atar_truth_z`, which the
+loader uses for the slice-endpoint training targets. The model inputs use only the
+measured positions.
+
+**Parquets converted before 2026-10-29 store the truth centroid in `atar_x/y/z`.**
+The measured coordinate there is continuous within the strip and z is continuous
+within the plane, so those samples give the model sub-strip position information a
+real detector does not provide. Both selected checkpoints were trained and evaluated
+on such samples; their ATAR position resolutions are optimistic, and running them on
+newly converted samples is out of their training distribution. New results need
+reconverted samples and retrained models.
+
 The pinned profiles apply the historical **250 total hit** limit; rows with zero
 hits or more than 250 ATAR+LYSO hits are removed. That selection affects reported
 efficiencies. Main outputs carry diagnostics for retained rows. With

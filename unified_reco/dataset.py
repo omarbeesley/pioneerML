@@ -317,10 +317,16 @@ class PURITYDataset(Dataset):
                 np.array(atar_origin, dtype=np.int64), dtype=torch.long
             )
             
-            # Pre-extract arrays once for speed
-            atar_x_raw = np.array(row['atar_x']) if 'atar_x' in row else np.zeros(n_atar)
-            atar_y_raw = np.array(row['atar_y']) if 'atar_y' in row else np.zeros(n_atar)
-            atar_z_raw = np.array(row['atar_z']) if 'atar_z' in row else np.zeros(n_atar)
+            # Pre-extract arrays once for speed. The endpoint targets are truth: use the
+            # Geant4 deposit centroids (atar_truth_x/y/z) where the converter stored them;
+            # atar_x/y/z hold the measured strip positions the model sees as input.
+            def _pos(truth_col, col):
+                if truth_col in row and row[truth_col] is not None:
+                    return np.array(row[truth_col])
+                return np.array(row[col]) if col in row else np.zeros(n_atar)
+            atar_x_raw = _pos('atar_truth_x', 'atar_x')
+            atar_y_raw = _pos('atar_truth_y', 'atar_y')
+            atar_z_raw = _pos('atar_truth_z', 'atar_z')
             
             unique_atar_slices, slice_inverse = np.unique(atar_slice, return_inverse=True)
             slice_targets = []
