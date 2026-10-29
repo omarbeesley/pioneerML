@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "created_utc": "2026-10-29T19:19:25.240804+00:00",
+  "created_utc": "2026-10-29T20:33:35.088355+00:00",
   "scope": "Self-contained directory handoff preserving the inspected current main and tail implementations, including changes newer than the thesis, with local selected checkpoints, preparation, analysis and plotting. Current-source parity and isolated workflow checks passed. Thesis Chapters 5-6 provide a historical figure/result map; exact thesis replay is distinct from benchmarking the released source and is not required to preserve newer improvements. 2026-10-28: trimmed to models, inference and benchmarks, data preparation, training, the R_e/mu analysis and the tail cut chain (thesis figure reproduction moved to ../thesis_reproduction/); added trainers, training-data recipes and launchers and a stable event key; checkpoints are weights-only copies. See provenance/changes_20261028.json.",
   "files": [
     {
@@ -55,8 +55,8 @@
     },
     {
       "file": "docs/data_contract.md",
-      "bytes": 6487,
-      "sha256": "1d8eb36f8bc520cd6e959065695c7118bae615d6e655be29b6336afe13f383cc"
+      "bytes": 6841,
+      "sha256": "4fea22c4e18800878b5795cc1116da29f838bf0d7baea48937954ed5449dde84"
     },
     {
       "file": "docs/data_preparation.md",
@@ -205,8 +205,8 @@
     },
     {
       "file": "provenance/validation_atar_strip_converter.json",
-      "bytes": 1013,
-      "sha256": "ae91e4e18ffdf0621645f8aa38dee222f14e7b3f2d20722b0eae3e1e8df9b4e5"
+      "bytes": 1918,
+      "sha256": "fdd352374ec68759b8537d025581b7983c2beeea4e7e103341bb133e4691bd4f"
     },
     {
       "file": "provenance/validation_atar_strip_positions.json",
@@ -580,8 +580,8 @@
     },
     {
       "file": "src/purity/preprocessing/atar_strip_positions.py",
-      "bytes": 6757,
-      "sha256": "a101231e61f6723f43017cc43717ee879406e4f283224a47dc9676d326f1d452"
+      "bytes": 10021,
+      "sha256": "7b576c10d81fb3823942b94da337a837d8b6c9f565548d54654a8dce8fa554a4"
     },
     {
       "file": "src/purity/preprocessing/build_atar_lut.py",

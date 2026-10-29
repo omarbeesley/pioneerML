@@ -24,5 +24,31 @@
    "seconds": 48
   }
  },
- "row_groups_preserved": true
+ "row_groups_preserved": true,
+ "boundary_rule": {
+  "rule": "boundary hit -> candidate strip without another non-boundary hit of the same event, origin, view and plane within 2 ns (atar_t); even-numbered strip if undecided",
+  "truth_scoring": {
+   "sample": "500 pie + 500 Michel events, ROOT-converted (truth strip known)",
+   "boundary_hits": 2348,
+   "even_rule_correct": 0.493,
+   "occupancy_decides": 0.997,
+   "occupancy_correct_when_decided": 1.0,
+   "overall_correct": 0.9987
+  },
+  "end_to_end": {
+   "be_pie": "28780 hits, 912 boundary, 910 by neighbour, 1 position differs from ROOT",
+   "be_michel": "31147 hits, 1436 boundary, 1430 by neighbour, 2 differ",
+   "mixed_resliced_40": "2585 hits, 169 boundary, all by neighbour, 0 differ"
+  },
+  "train10M_fixed_row_group_0": {
+   "boundary_hits": 797080,
+   "by_neighbour": 795112,
+   "fallback": 1968,
+   "seconds": 60
+  },
+  "slurm_jobs": [
+   2286527,
+   2286536
+  ]
+ }
 }

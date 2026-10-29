@@ -49,11 +49,15 @@ and plane of its own view, using the geometry table `assets/luts/atar_strips.npz
 (built from a simulation file by `purity.preprocessing.build_atar_lut`). It keeps every
 other column, the row order and the row groups, so it applies equally to unmixed pools
 and to mixed, resliced samples; positions play no part in mixing or reslicing. About
-5% of hits have a deposit centroid exactly on the boundary between two strips, because
-the converter used Geant4 step end points; the older parquet does not record which
-strip such a hit was in, so it goes to the even-numbered of the two, which is unbiased
-on average. Every other hit matches a fresh ROOT conversion exactly. A 250,000-event
-row group takes about 45 s.
+5% of hits have their deposit centroid exactly on the boundary between two strips,
+because the converter used Geant4 step end points: the particle left the strip there and
+crossed into its neighbour. The neighbour therefore holds its own hit at the same time,
+and one strip cannot hold two hits within the converter's 2 ns merge window, so a
+boundary hit goes to the candidate strip that has no other hit from the same simulated
+event (same view, plane and `atar_origin`) within 2 ns. Against fresh ROOT conversions
+this decides 99.7% of boundary hits, all correctly; the rest go to the even-numbered
+strip. Overall 3 of 59,927 hits in 1,000 events differ from a ROOT conversion. A 250,000-event
+row group takes about 60 s.
 
 The pinned profiles apply the historical **250 total hit** limit; rows with zero
 hits or more than 250 ATAR+LYSO hits are removed. That selection affects reported
