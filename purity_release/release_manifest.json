@@ -1,17 +1,22 @@
 {
   "schema_version": 1,
-  "created_utc": "2026-10-29T18:50:59.396177+00:00",
+  "created_utc": "2026-10-29T19:19:25.240804+00:00",
   "scope": "Self-contained directory handoff preserving the inspected current main and tail implementations, including changes newer than the thesis, with local selected checkpoints, preparation, analysis and plotting. Current-source parity and isolated workflow checks passed. Thesis Chapters 5-6 provide a historical figure/result map; exact thesis replay is distinct from benchmarking the released source and is not required to preserve newer improvements. 2026-10-28: trimmed to models, inference and benchmarks, data preparation, training, the R_e/mu analysis and the tail cut chain (thesis figure reproduction moved to ../thesis_reproduction/); added trainers, training-data recipes and launchers and a stable event key; checkpoints are weights-only copies. See provenance/changes_20261028.json.",
   "files": [
     {
       "file": ".gitignore",
-      "bytes": 590,
-      "sha256": "b938b27864c1240bc945a099c835c3e7fea00f90bd447489cf403f516620f2a5"
+      "bytes": 607,
+      "sha256": "2718f6f0777727b31aec2ec57078cd9c0e2bb7052b35276870eb2e7ec71507a3"
     },
     {
       "file": "README.md",
-      "bytes": 6162,
-      "sha256": "b20564f989308f83da25e2ea89067913bf39e1facf3feaa1b961e18256386fdc"
+      "bytes": 6244,
+      "sha256": "340ffb01878b5490ca832f87f638c3ba17e76ee1d3df493dc9399f05b9e7c463"
+    },
+    {
+      "file": "assets/luts/atar_strips.npz",
+      "bytes": 63390,
+      "sha256": "077aee44337e2680a9a29c6ab08dc5fa6aee4437154bff30308d8ba1c1bc58b8"
     },
     {
       "file": "assets/luts/crystalLUT.npy",
@@ -50,8 +55,8 @@
     },
     {
       "file": "docs/data_contract.md",
-      "bytes": 5518,
-      "sha256": "00c6337e861ab250f4d5a0a4863a183d499cd4494cb336a018dbf70bd1723ef7"
+      "bytes": 6487,
+      "sha256": "1d8eb36f8bc520cd6e959065695c7118bae615d6e655be29b6336afe13f383cc"
     },
     {
       "file": "docs/data_preparation.md",
@@ -104,14 +109,19 @@
       "sha256": "502a070165e20e3bb7e1274620463376b7a3a8382193228ca4a21ffe9f932626"
     },
     {
+      "file": "provenance/atar_strips_lut.json",
+      "bytes": 997,
+      "sha256": "d0a432af47d0d0d66f3cc4881b385d959ff1a5659896c7dea88a1553115db776"
+    },
+    {
       "file": "provenance/bias_vs_theta_export.json",
       "bytes": 2436,
       "sha256": "c762423b357352a595f615d2e907b8dbf1b0301b1504c9ecfd6ed8ffab370e3b"
     },
     {
       "file": "provenance/changes_20261028.json",
-      "bytes": 13881,
-      "sha256": "a62dbd09b5c1b6bf533d9bb6f0d0f9558e95c7ac6afd0be8e6a55973146ba2bb"
+      "bytes": 14168,
+      "sha256": "c3b9c6541b881e6c6eadecf9eb462f7ecca1c2cecd302f46c4f33f338a6789ac"
     },
     {
       "file": "provenance/diagnostics_export.json",
@@ -192,6 +202,11 @@
       "file": "provenance/training_artifacts.json",
       "bytes": 19152,
       "sha256": "a49cbc2c42acaa123d4a507a906570a055a665901e89d11f990177ea1779c5b1"
+    },
+    {
+      "file": "provenance/validation_atar_strip_converter.json",
+      "bytes": 1013,
+      "sha256": "ae91e4e18ffdf0621645f8aa38dee222f14e7b3f2d20722b0eae3e1e8df9b4e5"
     },
     {
       "file": "provenance/validation_atar_strip_positions.json",
@@ -562,6 +577,16 @@
       "file": "src/purity/preprocessing/assemble_pool.py",
       "bytes": 1264,
       "sha256": "9bfe942d35c37d61c364294924b28241f96fa36655eab681261e3dadf6dab3f6"
+    },
+    {
+      "file": "src/purity/preprocessing/atar_strip_positions.py",
+      "bytes": 6757,
+      "sha256": "a101231e61f6723f43017cc43717ee879406e4f283224a47dc9676d326f1d452"
+    },
+    {
+      "file": "src/purity/preprocessing/build_atar_lut.py",
+      "bytes": 1975,
+      "sha256": "b51f7b0d31991dc7368ad35490035b311d80de2e458a5ffc8546f779ad8e042c"
     },
     {
       "file": "src/purity/preprocessing/concat_clean.py",

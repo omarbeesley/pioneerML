@@ -1,0 +1,28 @@
+{
+ "schema_version": 1,
+ "status": "passed",
+ "checked_utc": "2026-10-29",
+ "slurm_jobs": [
+  2286447,
+  2286452
+ ],
+ "lookup_table": "assets/luts/atar_strips.npz from omar_pipeline pie_001_00000-01.root GeoHeader: 4800 strips, 100 centres per view (-9.9 to 9.9 mm), 24 planes per view.",
+ "equivalence": "50 pie + 50 Michel events converted from ROOT with the current converter, downgraded to the old format, converted back: atar_z and atar_truth_x/y/z identical; atar_x/y differ in 34+26 (pie) and 40+30 (Michel) hits, all with the truth centroid on a strip boundary and all by exactly one strip; every other column identical. Boundary hits 126/2795 (pie), 143/3696 (Michel).",
+ "real_pools": {
+  "train10M_fixed row group 0": {
+   "events": 250000,
+   "hits": 15601202,
+   "boundary_hits": 797080,
+   "outliers": 0,
+   "seconds": 45
+  },
+  "tail10 train_000_osl": {
+   "events": 200000,
+   "hits": 13656454,
+   "boundary_hits": 728335,
+   "outliers": 0,
+   "seconds": 48
+  }
+ },
+ "row_groups_preserved": true
+}

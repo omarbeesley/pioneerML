@@ -38,6 +38,23 @@ on such samples; their ATAR position resolutions are optimistic, and running the
 newly converted samples is out of their training distribution. New results need
 reconverted samples and retrained models.
 
+Older parquets do not need the ROOT files to be reconverted:
+
+```bash
+python -m purity.preprocessing.atar_strip_positions --input old.parquet --output new.parquet
+```
+
+moves `atar_x/y/z` to `atar_truth_x/y/z` and snaps each hit to the nearest strip centre
+and plane of its own view, using the geometry table `assets/luts/atar_strips.npz`
+(built from a simulation file by `purity.preprocessing.build_atar_lut`). It keeps every
+other column, the row order and the row groups, so it applies equally to unmixed pools
+and to mixed, resliced samples; positions play no part in mixing or reslicing. About
+5% of hits have a deposit centroid exactly on the boundary between two strips, because
+the converter used Geant4 step end points; the older parquet does not record which
+strip such a hit was in, so it goes to the even-numbered of the two, which is unbiased
+on average. Every other hit matches a fresh ROOT conversion exactly. A 250,000-event
+row group takes about 45 s.
+
 The pinned profiles apply the historical **250 total hit** limit; rows with zero
 hits or more than 250 ATAR+LYSO hits are removed. That selection affects reported
 efficiencies. Main outputs carry diagnostics for retained rows. With

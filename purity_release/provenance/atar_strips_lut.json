@@ -1,0 +1,33 @@
+{
+  "command": [
+    "/home/obeesley/pioneerML/purity_release/src/purity/preprocessing/build_atar_lut.py",
+    "--input",
+    "/data/raid3/eliza7/PIONEER/data/ML_TEST/omar_pipeline/root/pie/pie_001_00000-01.root",
+    "--output",
+    "/home/obeesley/pioneerML/purity_release/outputs/strip_geometry_20261029/atar_strips.npz"
+  ],
+  "source": {
+    "path": "/home/obeesley/pioneerML/purity_release/src/purity/preprocessing/build_atar_lut.py",
+    "bytes": 1975
+  },
+  "source_sha256": "b51f7b0d31991dc7368ad35490035b311d80de2e458a5ffc8546f779ad8e042c",
+  "inputs": [
+    {
+      "path": "/data/raid3/eliza7/PIONEER/data/ML_TEST/omar_pipeline/root/pie/pie_001_00000-01.root",
+      "bytes": 491308906
+    }
+  ],
+  "output": {
+    "path": "/home/obeesley/pioneerML/purity_release/outputs/strip_geometry_20261029/atar_strips.npz",
+    "bytes": 63390
+  },
+  "settings": {
+    "strips": 4800,
+    "planes": 48,
+    "strips_per_view": [
+      2400,
+      2400
+    ]
+  },
+  "data_contents_hashed": false
+}
