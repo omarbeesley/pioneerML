@@ -230,6 +230,15 @@ class PURITYDataset(Dataset):
 
         initial_len = len(self.df)
         keep = ((total_hits > 0) & (total_hits <= max_hits)).to_numpy()
+        # Positions of the kept rows within the loaded rows, for aligning per-row sidecars
+        # (e.g. the oversampling flags) that were written for the unfiltered rows.
+        self.kept_rows = np.flatnonzero(keep)
+        # Optional per-event weight on the continuous regressions, set by the trainer when
+        # it oversamples hard topologies (1 / oversampling factor). None = weight 1.
+        self.regression_weight = None
+        # Optional callable (row, idx) -> row applied before the row is read, e.g.
+        # purity.augment.BremTransplant. Training only.
+        self.augment = None
         self.source_row = (np.flatnonzero(keep).astype(np.int64) + int(source_row_offset)
                            if in_file_order else None)
         self.df = self.df[keep].reset_index(drop=True)
@@ -242,6 +251,8 @@ class PURITYDataset(Dataset):
 
     def get(self, idx):
         row = self.df.iloc[idx]
+        if self.augment is not None:
+            row = self.augment(row, idx)
         
         # Parse arrays
         atar_x = row['atar_x']
@@ -538,6 +549,8 @@ class PURITYDataset(Dataset):
         # Truth dead-material energy loss (positron + descendants only).
         # Carries through from root_to_parquet → pileup_mixer.
         data.dead_E_target = torch.tensor([float(row.get('dead_E', 0.0))], dtype=torch.float)
+        w = 1.0 if self.regression_weight is None else float(self.regression_weight[idx])
+        data.regression_weight = torch.tensor([w], dtype=torch.float)
         
         # Object Condensation LYSO Targets
         if n_lyso > 0 and 'lyso_origin' in row:

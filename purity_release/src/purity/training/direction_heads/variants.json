@@ -1,0 +1,9 @@
+[
+ {"name": "mask50",    "heads": [0, 24], "mask_frac": 0.5},
+ {"name": "mask10",    "heads": [0, 24], "mask_frac": 0.1},
+ {"name": "finetune",  "heads": [0, 24], "mask_frac": 0.5, "init": "checkpoint", "schedule": "6.25e-5:10000"},
+ {"name": "allevents", "heads": [0, 4],  "mask_frac": 1.0},
+ {"name": "orderonly", "heads": [0, 4],  "mask_frac": 1.0, "fixed_init": true},
+ {"name": "maskonly",  "heads": [0, 4],  "mask_frac": 0.5, "fixed_init": true},
+ {"name": "long",      "heads": [0, 0],  "mask_frac": 1.0, "schedule": "5e-4:60000,2.5e-4:30000,1.25e-4:30000,6.25e-5:60000"}
+]

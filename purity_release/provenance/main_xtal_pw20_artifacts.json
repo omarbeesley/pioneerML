@@ -1,0 +1,50 @@
+{
+ "schema_version": 1,
+ "date": "2026-11-11",
+ "checkpoint": {
+  "file": "checkpoints/main_xtal_pw20_epoch20_heads25.pth",
+  "sha256": "aadb24807f747995967c5f7a32cda40201a4870987d3c002f8adb00fb5b53803",
+  "contents": "weights only: main_xtal_pw20 epoch 20 (the network and its own direction head) plus dir_ensemble.0-24, the 25 heads of set mask50; per-head training records in the checkpoint's head_records",
+  "profile": "configs/main_xtal_pw20_ep20_heads25.json (PURITY_DIR_HEADS 25, PURITY_POS_TRIG_THR 0.001)",
+  "built_by": "python -m purity.training.direction_heads.build_checkpoint"
+ },
+ "training": {
+  "data": "train10M_xtal: the train10M pool converted to measured ATAR strip/plane positions and LYSO crystal positions (scratch_pipeline/train10M_xtal)",
+  "environment": {"PURITY_HIT_ENDPOINTS": "1", "PURITY_GATE_DEADZONE_Z_MM": "0.10", "PURITY_GATE_DEADZONE_XY_MM": "0.10",
+                  "PURITY_GATE_MODE": "best_xy", "PURITY_BEST_XY_BETA": "0.5", "PURITY_ROLE_FILM": "1"},
+  "runs": [
+   {"run": "main_xtal_hitep", "epochs": "1-4", "launcher": "scripts/slurm/train_main.sbatch PHASE=1"},
+   {"run": "main_xtal_hitep2", "epochs": "5-20 (epoch 14 resumed below)", "launcher": "PHASE=2",
+    "epoch14_sha256": "03eee50fd3fdf5b80f34e89e534235cd2b723b46af80b8ff3769e3e769321274"},
+   {"run": "main_xtal_pw20", "epochs": "15-20", "launcher": "PHASE=3",
+    "differences": "resume main_xtal_hitep2 epoch 14, LRs 6.25e-5 / 6.25e-5 / 1.25e-4, --role_ce_positron_weight 20",
+    "epoch20_sha256_with_optimizer": "e47fe008d6154d92c06db394602506a2322c9e4c7dbbc0c5fb7a0c400e9acf0e",
+    "original": "scratch_pipeline/model_weights_lossvar/main_xtal_pw20_epoch20.pth"}
+  ],
+  "direction_heads": {
+   "set": "mask50 (src/purity/training/direction_heads/variants.json)",
+   "inputs": "train10M_xtal train.parquet chunk 9 (998,699 events after the hit cap), val.parquet row group 0 first 100,000 events, dumped at trigger threshold 0.001",
+   "per_head": "random init seed 1000+i, random half of the events seed 2000+i, batch order seed 3000+i, pooled hits at trigger probability > 0.5, 60,000 steps of 100 events, AdamW 5e-4 halved three times to 6.25e-5, weight decay 1e-3, clip 2; loss 0.25 x (1 - cos) on match-gated events + 0.05 x moment decorrelation",
+   "time": "25 heads trained together in 346 s on the g3200 GPU"
+  }
+ },
+ "evaluation": {
+  "samples": "pie: 39 shards of norad_flat_rs (10,077,230 events); Michel: 392 shards of the open fl2 Michel pool regenerated with its recipe and seeds (101,496,177 events); all converted to measured strip and crystal positions",
+  "michel_pool": "trigger chain not kPienu, kPidif, kMurad or kMudif, and true positron energy <= 52.83 MeV",
+  "acceptance_bias_definition": "counting: truth-accepted (truth_acceptance, t_true <= 495 ns) vs reco-accepted (pred_accepted, t_reco in [-300, 495] ns, |t_reco - t_true| < 5 ns); bias = (1 + NET_pie) / (1 + NET_michel) - 1",
+  "acceptance_bias_percent": {
+   "this checkpoint (25-head average angle)": {"total": 0.080, "stat": 0.006, "identification_missed": 0.024, "timing_row": 0.010,
+     "fiducial": 0.018, "angle": 0.025, "window_edge": 0.004, "even_shards": 0.080, "odd_shards": 0.080},
+   "network's own direction head": {"total": 0.005, "stat": 0.007, "angle": -0.051},
+   "timing_row_split": "wrong positron chosen (accidental) +0.012, right positron mis-timed by 5-30 ns -0.002; the first is identification, the second and the 495 ns window edge come from the counting definition",
+   "head_recipe_dependence": "25-head averages of other sets: finetune (from the network's own head) angle -0.035, mask10 +0.031; single heads scatter by 0.03-0.07"
+  },
+  "angle_resolution_near_120_deg": {"pie": {"own": 1.383, "25_head_average": 1.206}, "michel": {"own": 2.289, "25_head_average": 2.074},
+                                    "definition": "interquartile range / 1.349 of reco - true polar angle, true angle 110-130 deg, claimed events"},
+  "michel_accidental_claims_percent": 2.19
+ },
+ "validation": {
+  "release_runner_vs_study": "release runner with this profile on 3000 events each of Michel shard 000 and pie shard 00: polar angle equals the mean of the 25 mask50 head angles of the study to <= 1.0e-4 deg, acceptance identical (0 mismatches); every other column identical to the same run without heads on the same node",
+  "default_path": "the plain pw20 checkpoint through the edited model code (PURITY_DIR_HEADS 0) reproduces the study's evaluation: discrete outputs identical, continuous ones within float rounding between node types (<= 3e-6 in positions and directions)"
+ }
+}

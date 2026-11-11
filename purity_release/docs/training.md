@@ -67,6 +67,75 @@ inference, which is off when `PURITY_ENERGY_TIME_GATE_NS` is 0.
 
 On the g3200 GPU a training epoch took 64–73 minutes; phase 2 ran in 20.0 hours.
 
+## Current reconstruction model: pw20 with 25 direction heads
+
+`checkpoints/main_xtal_pw20_epoch20_heads25.pth`, run with
+`configs/main_xtal_pw20_ep20_heads25.json`, is the network `main_xtal_pw20` epoch 20
+with 25 extra direction heads. It was built in three steps.
+
+**1. The network up to epoch 14.** The phase-1/phase-2 recipe above, on
+`train10M_xtal`: the training pool converted to measured ATAR strip positions
+(`purity.preprocessing.atar_strip_positions`) and LYSO crystal positions
+(`purity.preprocessing.lyso_crystal_positions`), with the hit-anchored endpoints on.
+Runs `main_xtal_hitep` (epochs 1–4) and `main_xtal_hitep2` (epochs 5–20; epoch 14 is
+used below).
+
+**2. pw20, epochs 15–20.** Resume `main_xtal_hitep2` epoch 14 at the epoch-15 rates
+(6.25e-5 / 6.25e-5 / 1.25e-4) with the positron class weight of the role
+cross-entropy raised from 5 to 20 (`--role_ce_positron_weight 20`). The weight
+lowers the share of Michel positrons the chain misses at a given rate of accidental
+positron claims; it does not change the trade-off between the two.
+
+```bash
+export PURITY_HIT_ENDPOINTS=1 PURITY_GATE_DEADZONE_Z_MM=0.10 PURITY_GATE_DEADZONE_XY_MM=0.10
+C="ALL,DATA=/data/train10M_xtal,OUT=$PWD/outputs/weights,NAME1=main_xtal_hitep,NAME2=main_xtal_hitep2"
+J1=$(sbatch --parsable --export=$C,PHASE=1 scripts/slurm/train_main.sbatch)
+J2=$(sbatch --parsable --dependency=afterok:$J1 --export=$C,PHASE=2 scripts/slurm/train_main.sbatch)
+sbatch --dependency=afterok:$J2 --export=$C,PHASE=3 scripts/slurm/train_main.sbatch
+```
+
+**3. 25 direction heads on the frozen network** (`purity.training.direction_heads`).
+The direction head (`dir_attn_pool` + `positron_dir_head`, 0.4M parameters) reads the
+network's per-hit features of the positron-tagged ATAR hits and the predicted pion
+stop. Retrained alone on the frozen network, single heads scatter in the acceptance
+bias by as much as successive training epochs do (0.03–0.07 pp); the average of 25
+removes that scatter and sharpens the polar angle near 120° (pie 1.38° to 1.21°,
+Michel 2.29° to 2.07°).
+
+```bash
+# a. what the head reads: one training chunk (1M events) and 100k validation events, at
+#    the inference threshold 0.001 (every tagged hit is saved with its probabilities)
+python -m purity.training.direction_heads.dump_inputs --config PROFILE --checkpoint main_xtal_pw20_epoch20.pth \
+    --data train10M_xtal/train.parquet --chunk 9 --out CACHE/train
+python -m purity.training.direction_heads.dump_inputs --config PROFILE --checkpoint main_xtal_pw20_epoch20.pth \
+    --data train10M_xtal/val.parquet --row_groups 0 --max_events 100000 --out CACHE/val
+# b. the heads (GPU, about 6 minutes for the 25 of mask50)
+python -m purity.training.direction_heads.train --cache CACHE/train --val CACHE/val \
+    --reference main_xtal_pw20_epoch20.pth --out HEADS \
+    --variants src/purity/training/direction_heads/variants.json --only mask50
+# c. the checkpoint
+python -m purity.training.direction_heads.build_checkpoint main_xtal_pw20_epoch20.pth HEADS/mask50 \
+    checkpoints/main_xtal_pw20_epoch20_heads25.pth
+```
+
+`PROFILE` is the released profile with `PURITY_DIR_HEADS` set to 0 (the dump always runs
+the network alone). Each `mask50` head starts from PyTorch's default initialization
+with seed 1000 + i, sees its own random half of the cached events (seed 2000 + i) in
+its own batch order (seed 3000 + i), pools the hits tagged at trigger probability 0.5
+as the network's own head was trained to, and is trained with the trainer's angle loss
+(0.25 × (1 − cos) on events whose tagged hits are mostly the true positron's, plus 0.05
+× the moment decorrelation) for 60,000 steps of 100 events, AdamW at 5e-4 halved three
+times down to 6.25e-5. `variants.json` also lists the comparison sets of the study.
+
+At inference (`PURITY_DIR_HEADS` = 25) the model averages the 25 heads' polar angles;
+the event summary's polar angle and its θ < 120° acceptance use that average. The
+positron direction used for LYSO matching and the dead-material energy stays the
+network's own. The released profile also sets `PURITY_POS_TRIG_THR` = 0.001, the
+lenient identification the model was selected at.
+
+The pw20 epochs took 70 minutes each on the g3200 GPU. Results of this model are in
+[main_xtal_pw20_artifacts.json](../provenance/main_xtal_pw20_artifacts.json).
+
 ## Tail model
 
 `purity.training.tail` is the trainer of `PURITY_TAIL10`, ported from the external

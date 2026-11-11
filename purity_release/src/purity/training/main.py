@@ -44,6 +44,10 @@ TRAIN_ENVIRONMENT = {
     "PURITY_BEST_XY_BETA": "0.5",
     "PURITY_ROLE_FILM": "1",
     "PURITY_ENERGY_TIME_GATE_NS": "0",
+    # Off in the filmg2 recipe; the strip-position retrain sets them in its job script.
+    "PURITY_HIT_ENDPOINTS": "0",
+    "PURITY_GATE_DEADZONE_Z_MM": "0",
+    "PURITY_GATE_DEADZONE_XY_MM": "0",
 }
 for _k, _v in TRAIN_ENVIRONMENT.items():
     os.environ.setdefault(_k, _v)
@@ -71,6 +75,8 @@ BASE_TASK_WEIGHTS = {
     'w_node_pdg':               1.0,
     'w_slice_pdg':              0.1,
     'w_endpoints':              0.01,
+    # Hit-anchored endpoint candidates; only computed when PURITY_HIT_ENDPOINTS=1.
+    'w_hit_endpoints':          0.05,
     'w_lyso_condensation':      0.25,
     'w_atar_trigger_slice':     0.5,
     'w_chain_exclusive':        5.0,   # heavy: exactly ONE e+ in the triggering chain
@@ -148,7 +154,9 @@ def get_task_weights(epoch, stage2_epoch, overrides=None):
     if epoch < stage2_epoch:
         for k in STAGE2_KEYS:
             tw[k] = 0.0
-    tw['role_ce_positron_weight'] = role_ce_alpha(epoch, BASE_TASK_WEIGHTS['role_ce_positron_weight'])
+    tw['role_ce_positron_weight'] = role_ce_alpha(
+        epoch, (overrides or {}).get('role_ce_positron_weight',
+                                     BASE_TASK_WEIGHTS['role_ce_positron_weight']))
     return tw
 
 
@@ -187,6 +195,63 @@ def build_optimizer(model, lr_base, lr_event, lr_bias, weight_decay):
         {'params': event_params,       'lr': lr_event, 'weight_decay': weight_decay},
         {'params': bias_scalar_params, 'lr': lr_bias,  'weight_decay': 0.0},
     ])
+
+
+def split_role_group(optimizer, model, role_lr, with_builder):
+    """Move the role head (and, with_builder, the event-builder layers feeding it) out of the
+    existing groups into a fourth AdamW group at role_lr, keeping every parameter's AdamW state."""
+    prefixes = ("atar_role_",) + (("atar_event_layers.", "kernel_alpha") if with_builder else ())
+    role = [p for n, p in model.named_parameters() if n.startswith(prefixes)]
+    if not role:
+        raise ValueError("--role_lr: no role-head parameters found")
+    ids = {id(p) for p in role}
+    groups = [{**{k: v for k, v in pg.items() if k != 'params'},
+               'params': [p for p in pg['params'] if id(p) not in ids]}
+              for pg in optimizer.param_groups]
+    groups.append({'params': role, 'lr': role_lr,
+                   'weight_decay': optimizer.param_groups[0]['weight_decay']})
+    new = torch.optim.AdamW(groups)
+    for p, st in optimizer.state.items():
+        new.state[p] = st
+    return new, sum(p.numel() for p in role)
+
+
+def parse_oversample(spec):
+    """'gap=3,e_detached=2.5' -> {'gap': 3.0, 'e_detached': 2.5}."""
+    out = {}
+    for item in (spec or "").split(","):
+        if item.strip():
+            k, v = item.split("=")
+            out[k.strip()] = float(v)
+            if out[k.strip()] < 1.0:
+                raise ValueError(f"oversampling factor below 1: {item}")
+    return out
+
+
+def oversample_chunk(train_set, flags_dir, row_groups, factors, rng):
+    """Repeat the chunk's flagged events and set their regression weights to 1/factor.
+
+    The flags are read for the chunk's row groups in the order the dataset concatenates
+    them (sorted) and aligned to the rows that survived the hit filter. Returns the
+    oversampled dataset view and the per-flag counts for the log.
+    """
+    import numpy as _np
+    import pyarrow as _pa
+    import pyarrow.parquet as _pq
+    flags = _pa.concat_tables([
+        _pq.read_table(os.path.join(flags_dir, f"rg_{int(g):04d}.parquet"), columns=list(factors))
+        for g in sorted(row_groups)]).to_pandas()
+    flags = flags.iloc[train_set.kept_rows].reset_index(drop=True)
+    if len(flags) != len(train_set):
+        raise ValueError(f"flags rows {len(flags)} != dataset rows {len(train_set)}")
+    f = _np.ones(len(flags))
+    for k, v in factors.items():
+        f = _np.where(flags[k].to_numpy(bool), _np.maximum(f, v), f)
+    reps = _np.floor(f).astype(_np.int64) + (rng.random(len(f)) < f - _np.floor(f))
+    train_set.regression_weight = 1.0 / f
+    idx = _np.repeat(_np.arange(len(f)), reps)
+    counts = {k: int(flags[k].sum()) for k in factors}
+    return train_set.index_select(idx.tolist()), counts, float(reps.sum()) / len(f)
 
 
 def linear_warmup_factor(global_step, warmup_steps):
@@ -371,6 +436,14 @@ def main():
                         help="Multiplicative factor applied to LR each step.")
     parser.add_argument("--lr_step_size", type=int,   default=5,
                         help="Halve LR every this many epochs.")
+    parser.add_argument("--role_lr", type=float, default=None,
+                        help="Move the role head (the per-slice none/muon/positron classifier whose "
+                             "positron-in-chain probability is the trigger probability) into its "
+                             "own AdamW group at this LR, held constant: the StepLR decay applies "
+                             "to the other groups only. Default: no separate group.")
+    parser.add_argument("--role_group_builder", action="store_true",
+                        help="With --role_lr, also hold the ATAR event-builder layers that feed "
+                             "the role head (atar_event_layers, kernel_alpha).")
 
     parser.add_argument("--val_max_batches", type=int, default=None)
     parser.add_argument("--skip_val", action="store_true")
@@ -379,14 +452,48 @@ def main():
     parser.add_argument("--truth_positron_mask", action="store_true",
                         help="Use truth-level hit labels for positron hit selection "
                              "in the direction head (bypasses predicted trigger/MIP probs).")
+    parser.add_argument("--oversample_flags", default=None,
+                        help="Directory of hard-topology flags for the training pool "
+                             "(purity.preprocessing.hard_event_flags, one rg_XXXX.parquet per "
+                             "row group). Requires --epoch_mode chunked.")
+    parser.add_argument("--oversample", default=None,
+                        help="Oversampling factors per flag, e.g. 'gap=3,e_detached=3,near90=2'. "
+                             "An event's factor is the largest of its flags' factors (1 if none). "
+                             "Within each epoch chunk an event appears floor(f) times plus one more "
+                             "with probability frac(f); its angle, pion-stop and dead-energy losses "
+                             "are weighted by 1/f.")
+    parser.add_argument("--brem_donors", default=None,
+                        help="Donor bank (purity.preprocessing.brem_donors) for transplanting "
+                             "real detached electron/photon hits into training events.")
+    parser.add_argument("--brem_prob", type=float, default=0.025,
+                        help="Fraction of training events with a positron that receive a donor "
+                             "cluster (with --brem_donors).")
     parser.add_argument("--w_angle_decorr", type=float, default=None,
                         help="Override the angle-decorrelation weight (default 0.05). "
                              "Phase 1 of filmg2 (filmg, epochs 1-4) used 0.5.")
+    parser.add_argument("--role_ce_positron_weight", type=float, default=None,
+                        help="Target of the positron-recall class weight in the role CE "
+                             "(default 5; ramped from 1 over epochs 5-9).")
+    parser.add_argument("--chain_exclusive_anchor", choices=["max", "truth"], default=None,
+                        help="Slice the exclusivity term protects: the most probable one "
+                             "(default) or the true positron slice when the event has one.")
+    parser.add_argument("--role_ce_focal_gamma", type=float, default=None,
+                        help="Focus the role CE's positron class on the slices it scores low: "
+                             "weight (1-P(e))^gamma, normalised over the batch (default 0 = off).")
     args = parser.parse_args()
 
     weight_overrides = {}
     if args.w_angle_decorr is not None:
         weight_overrides['w_angle_decorr'] = args.w_angle_decorr
+    for key in ("role_ce_positron_weight", "chain_exclusive_anchor", "role_ce_focal_gamma"):
+        if getattr(args, key) is not None:
+            weight_overrides[key] = getattr(args, key)
+    oversample_factors = parse_oversample(args.oversample)
+    if oversample_factors and (not args.oversample_flags or args.epoch_mode != "chunked"
+                               or args.epoch_size is None):
+        parser.error("--oversample needs --oversample_flags and --epoch_mode chunked")
+    if args.brem_donors and (args.epoch_mode != "chunked" or args.epoch_size is None):
+        parser.error("--brem_donors needs --epoch_mode chunked")
     environment = {k: os.environ[k] for k in TRAIN_ENVIRONMENT}
     provenance = {'args': vars(args), 'environment': environment,
                   'source_sha256': _source_sha256()}
@@ -477,9 +584,13 @@ def main():
             # Weights-only checkpoints (the release copies) carry no optimizer state.
             print(f"  [resume] no optimizer state in checkpoint — fresh optimizer at the CLI LRs")
         else:
+            if args.role_lr is not None and len(ckpt['optimizer']['param_groups']) == 4:
+                # a checkpoint of a held-role run: rebuild its four groups before loading
+                optimizer, _ = split_role_group(optimizer, model, args.role_lr,
+                                                args.role_group_builder)
             optimizer.load_state_dict(ckpt['optimizer'])
             # Override optimizer LRs with CLI args (checkpoint may have different LRs)
-            cli_lrs = [args.lr_base, args.lr_event, args.lr_bias]
+            cli_lrs = [args.lr_base, args.lr_event, args.lr_bias, args.role_lr]
             for pg, lr in zip(optimizer.param_groups, cli_lrs):
                 pg['lr'] = lr
         start_epoch = ckpt['epoch'] + 1
@@ -490,6 +601,13 @@ def main():
         print(f"  Resumed: epoch={ckpt['epoch']}, global_step={global_step}, "
               f"best_val={best_val:.4f}", flush=True)
 
+    if args.role_lr is not None and len(optimizer.param_groups) == 3:
+        optimizer, n_role = split_role_group(optimizer, model, args.role_lr,
+                                             args.role_group_builder)
+        print(f"  [role_lr] {n_role} parameters (role head"
+              f"{' + event builder' if args.role_group_builder else ''}) held at "
+              f"LR {args.role_lr}", flush=True)
+
     # Set initial_lr for the scheduler (required by StepLR).
     # On resume, treat CLI LRs as the desired starting LRs — don't let
     # the scheduler retroactively decay them based on elapsed epochs.
@@ -497,15 +615,24 @@ def main():
         pg['initial_lr'] = pg['lr']
 
     sched_last_epoch = start_epoch - 1 if not args.resume else -1
-    scheduler = torch.optim.lr_scheduler.StepLR(
-        optimizer,
-        step_size=args.lr_step_size,
-        gamma=args.lr_factor,
-        last_epoch=sched_last_epoch,
-    )
+    if args.role_lr is None:
+        scheduler = torch.optim.lr_scheduler.StepLR(
+            optimizer,
+            step_size=args.lr_step_size,
+            gamma=args.lr_factor,
+            last_epoch=sched_last_epoch,
+        )
+    else:
+        # StepLR's law on the first three groups, the role group held constant
+        step_law = lambda e: args.lr_factor ** (e // args.lr_step_size)
+        scheduler = torch.optim.lr_scheduler.LambdaLR(
+            optimizer, lr_lambda=[step_law] * 3 + [lambda e: 1.0],
+            last_epoch=sched_last_epoch,
+        )
 
     base_lrs = [pg['lr'] for pg in optimizer.param_groups]
-    print(f"\n  optimizer LRs (base/event/bias): {base_lrs}", flush=True)
+    print(f"\n  optimizer LRs (base/event/bias{'/role' if args.role_lr is not None else ''}): "
+          f"{base_lrs}", flush=True)
     print(f"  scheduler: StepLR (step_size={args.lr_step_size}, "
           f"gamma={args.lr_factor})", flush=True)
 
@@ -532,6 +659,19 @@ def main():
                       f"[chunked: no repeats within a pass]...", flush=True)
                 train_set = PURITYDataset(args.train_path, max_hits=args.max_hits,
                                           row_groups=chunk_plan[ci])
+                if args.brem_donors:
+                    from purity.augment import BremTransplant
+                    train_set.augment = BremTransplant(
+                        args.brem_donors, prob=args.brem_prob, seed=args.chunk_seed + epoch,
+                        max_hits=args.max_hits)
+                if oversample_factors:
+                    import numpy as _np
+                    n_before = len(train_set)
+                    train_set, n_flag, growth = oversample_chunk(
+                        train_set, args.oversample_flags, chunk_plan[ci], oversample_factors,
+                        _np.random.default_rng(args.chunk_seed + epoch))
+                    print(f"  [oversample] {n_before:,} events -> {len(train_set):,} draws "
+                          f"(x{growth:.3f}); flagged: {n_flag}", flush=True)
             else:
                 print(f"\n  Loading {args.epoch_size} random events for epoch {epoch}...",
                       flush=True)

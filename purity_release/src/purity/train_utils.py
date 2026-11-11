@@ -87,6 +87,97 @@ class PinballLoss(nn.Module):
         return total_loss, breakdown
 
 
+def _weighted_mean(values, weights):
+    """Weighted mean; equals values.mean() when all weights are 1."""
+    return (values * weights).sum() / weights.sum().clamp(min=1e-6)
+
+
+def _robust_sq(r, k=3.0):
+    """Half the squared residual within k widths, linear beyond (Huber), so one hit far from
+    any true end (a delta ray, a view that misses the track) cannot dominate the batch."""
+    a = r.abs()
+    return torch.where(a <= k, 0.5 * r ** 2, k * a - 0.5 * k ** 2)
+
+
+def hit_endpoint_loss(pred, pos, view, hit_slice, ends, scale=10.0):
+    """Loss for the hit-anchored endpoint candidates (models.layers.HitEndpointHead).
+
+    pred [n, 2, 5] per ATAR hit and channel: (score logit, offset_t, offset_z, sigma_t,
+    sigma_z); pos [n, 2] the hit's measured (transverse, z); view [n] 0 = XZ, 1 = YZ;
+    hit_slice [n] the hit's slice row; ends [S, 2, 3] the slice's true ends (x, y, z).
+    Positions are in model units; `scale` converts them to mm for the width terms.
+
+    Within each slice and view, the hit nearest a true end (in that view's transverse
+    coordinate and z) is that end's anchor. Each channel is trained to give its anchor the
+    highest score (cross entropy over the slice's hits in the view) and to reach the end
+    from it (offset residual over the width, Huber, plus log width). The two channels are
+    matched to the two ends per slice with whichever assignment costs less, summed over
+    both views, so the low/high labelling of near-transverse slices cannot flip the target.
+    """
+    from torch_geometric.utils import scatter
+    from purity.models.main import _group_log_softmax
+    n = pos.size(0)
+    S = ends.size(0)
+    G = 2 * S
+    group = hit_slice * 2 + view
+    hit_ends = ends[hit_slice]                                               # [n, 2 ends, 3]
+    tgt = torch.stack([torch.where(view.bool().unsqueeze(-1), hit_ends[..., 1], hit_ends[..., 0]),
+                       hit_ends[..., 2]], dim=-1)                            # [n, 2 ends, 2]
+    finite = torch.isfinite(tgt).all(dim=-1)                                 # [n, 2 ends]
+    tgt = torch.nan_to_num(tgt)
+
+    # Anchor of each (group, end): nearest hit, lowest index on ties.
+    dist = ((pos.unsqueeze(1) - tgt) ** 2).sum(-1).masked_fill(~finite, float('inf'))
+    dmin = scatter(dist, group, dim=0, dim_size=G, reduce='min')
+    idx = torch.arange(n, device=pos.device).unsqueeze(1).expand(n, 2)
+    cand = torch.where(dist <= dmin[group], idx, torch.full_like(idx, n))
+    anchor = scatter(cand, group, dim=0, dim_size=G, reduce='min')           # [G, 2 ends]
+    has = (anchor < n) & torch.isfinite(dmin)
+    anchor = anchor.clamp(max=n - 1)
+
+    logp = _group_log_softmax(pred[..., 0], group, G)                        # [n, 2 channels]
+    # cost[g, c, k]: channel c predicting end k from end k's anchor
+    a_logp = logp[anchor]                                                    # [G, k, c]
+    a_pred = pred[anchor]                                                    # [G, k, c, 5]
+    a_off_tgt = tgt[anchor, torch.arange(2, device=pos.device)] - pos[anchor]   # [G, k, 2]
+    r = (a_pred[..., 1:3] - a_off_tgt.unsqueeze(2)) / a_pred[..., 3:5]       # [G, k, c, 2]
+    nll = (_robust_sq(r) + torch.log(a_pred[..., 3:5] * scale)).sum(-1)      # [G, k, c]
+    ce = -a_logp
+    cost = (ce + nll).transpose(1, 2) * has.unsqueeze(1).float()             # [G, c, k]
+
+    per_slice = cost.view(S, 2, 2, 2).sum(1)                                 # [S, c, k]
+    direct = per_slice[:, 0, 0] + per_slice[:, 1, 1]
+    swapped = per_slice[:, 0, 1] + per_slice[:, 1, 0]
+    swap = swapped < direct
+    n_terms = has.view(S, 2, 2).sum(dim=(1, 2)).float()
+    n_total = n_terms.sum().clamp(min=1.0)
+    loss = torch.where(swap, swapped, direct).sum() / n_total
+
+    with torch.no_grad():
+        # Diagnostics on the aligned assignment: anchor found by the top score, and the
+        # distance in mm from the top-scored candidate to the true end.
+        chan = torch.arange(2, device=pos.device)
+        k_of_c = torch.where(swap.unsqueeze(1), 1 - chan, chan)              # [S, c]: end matched to channel c
+        k_g = k_of_c.repeat_interleave(2, dim=0)                             # [G, c]
+        top = scatter(logp.detach(), group, dim=0, dim_size=G, reduce='max')  # [G, c]
+        is_top = logp.detach() >= top[group]
+        top_idx = scatter(torch.where(is_top, idx, torch.full_like(idx, n)), group,
+                          dim=0, dim_size=G, reduce='min').clamp(max=n - 1)  # [G, c]
+        anchor_c = anchor.gather(1, k_g)
+        has_c = has.gather(1, k_g)
+        hit_ok = (top_idx == anchor_c) & has_c
+        cand_pos = pos[top_idx] + pred[top_idx, chan, 1:3]
+        true_pos = tgt[anchor_c, k_g]
+        err = (cand_pos - true_pos).norm(dim=-1) * scale
+        denom = has_c.float().sum().clamp(min=1.0)
+        breakdown = {
+            'CE': ((-logp.detach()[anchor_c, chan] * has_c.float()).sum() / denom).item(),
+            'AnchorAcc': (hit_ok.float().sum() / denom).item(),
+            'CandErrMM': ((err * has_c.float()).sum() / denom).item(),
+        }
+    return loss, breakdown
+
+
 class CondensationLoss(nn.Module):
     """
     Refined Object Condensation Loss with Highlander Penalty and Zero-Object Safety.
@@ -444,6 +535,15 @@ class PURITYLoss(nn.Module):
         loss_dict = {}
         total_loss = 0.0
 
+        # Per-event weight on the continuous regressions (angle, its decorrelation, pion
+        # stop, dead energy): 1 / oversampling factor when the trainer oversamples hard
+        # topologies, so those regressions keep the natural theta prior. 1 otherwise.
+        n_graphs = int(batch.num_graphs) if batch is not None and hasattr(batch, 'num_graphs') else 1
+        if batch is not None and getattr(batch, 'regression_weight', None) is not None:
+            reg_w = batch.regression_weight.float().view(-1)
+        else:
+            reg_w = torch.ones(n_graphs, device=batch.x.device if batch is not None else None)
+
         # 0.  Multi-Event Slice Classifier
         w_multi = self.config.get('w_atar_slice_multi', 0.0)
         if w_multi > 0.0 and 'atar_slice_multi' in outputs and 'atar_slice_multi_target' in targets:
@@ -530,9 +630,28 @@ class PURITYLoss(nn.Module):
                 pos_w = self.config.get('role_ce_positron_weight', 1.0)
                 class_w = (torch.tensor([1.0, 1.0, pos_w], device=role_logits.device)
                            if pos_w != 1.0 else None)
-                l_role_ce = F.cross_entropy(
-                    role_logits[non_anchor], role_targets[non_anchor], weight=class_w
-                )
+                focal_g = float(self.config.get('role_ce_focal_gamma', 0.0))
+                if focal_g > 0.0:
+                    # HARD-POSITRON FOCUS: each true positron slice's weight is scaled by
+                    # (1 - P(e))^gamma, normalised to mean 1 over the batch's positron slices,
+                    # so the positron class keeps its total weight but it moves from slices
+                    # the head already finds onto the ones it scores low. Other classes as
+                    # before; gamma=0 is the weighted CE above, exactly.
+                    lg, tg = role_logits[non_anchor], role_targets[non_anchor]
+                    w_i = (class_w if class_w is not None
+                           else torch.ones(3, device=lg.device))[tg]
+                    is_e = tg == 2
+                    if is_e.any():
+                        m = (1.0 - F.softmax(lg.detach(), dim=-1)[:, 2]).pow(focal_g)
+                        m = torch.where(is_e, m / m[is_e].mean().clamp(min=1e-6),
+                                        torch.ones_like(m))
+                        w_i = w_i * m
+                    ce = F.cross_entropy(lg, tg, reduction='none')
+                    l_role_ce = (w_i * ce).sum() / w_i.sum().clamp(min=1e-6)
+                else:
+                    l_role_ce = F.cross_entropy(
+                        role_logits[non_anchor], role_targets[non_anchor], weight=class_w
+                    )
             else:
                 l_role_ce = role_logits.new_zeros(())
 
@@ -576,7 +695,22 @@ class PURITYLoss(nn.Module):
                 e_max = role_logits.new_zeros(num_events)
                 e_max.index_reduce_(0, slice_event_idx, s_e, 'amax',
                                     include_self=True)               # per-event best e+
-                extra_e = (e_sum_na - e_max).clamp(min=0.0)          # mass on 2nd, 3rd...
+                e_keep = e_max
+                if (self.config.get('chain_exclusive_anchor', 'max') == 'truth'
+                        and role_targets.numel() == role_logits.size(0)):
+                    # TRUTH-ANCHORED: the protected slice is the true positron slice
+                    # whenever the event has one, not the currently most probable slice.
+                    # The constraint is unchanged (one e+ per chain: every other slice's
+                    # e+ mass is penalised), but its gradient on the true positron is zero,
+                    # so an accidental that briefly outscores it cannot push it down.
+                    # Events without a true positron slice keep the max anchor.
+                    is_true_e = ((role_targets == 2) & ~is_anchor).float()
+                    e_true = role_logits.new_zeros(num_events)
+                    n_true = role_logits.new_zeros(num_events)
+                    e_true.index_add_(0, slice_event_idx, s_e * is_true_e)
+                    n_true.index_add_(0, slice_event_idx, is_true_e)
+                    e_keep = torch.where(n_true > 0, e_true, e_max)
+                extra_e = (e_sum_na - e_keep).clamp(min=0.0)         # mass on 2nd, 3rd...
                 l_exclusive = extra_e.mean()
                 loss_dict['loss_chain_exclusive'] = l_exclusive
                 total_loss += w_excl * l_exclusive
@@ -669,7 +803,9 @@ class PURITYLoss(nn.Module):
         # 3A. Kinematic Pion Stop (Phase 10 — per-graph regression)
         w_pion = self.config.get('w_pion_kinematics', 0.0)
         if w_pion > 0.0 and 'atar_pion_stop' in outputs and 'tar_pion_stop_xyz' in targets:
-            l_pion = F.smooth_l1_loss(outputs['atar_pion_stop'], targets['tar_pion_stop_xyz'])
+            l_pion_ev = F.smooth_l1_loss(outputs['atar_pion_stop'], targets['tar_pion_stop_xyz'],
+                                         reduction='none').mean(dim=1)
+            l_pion = _weighted_mean(l_pion_ev, reg_w)
             loss_dict['loss_pion_kinematics'] = l_pion
             total_loss += w_pion * l_pion
             
@@ -698,6 +834,27 @@ class PURITYLoss(nn.Module):
             for k, v in end_breakdown.items():
                 loss_dict[f'end_{k}'] = v
             total_loss += w_end * l_end
+
+        # 3C. Hit-anchored endpoint candidates (first pass, and the refined pass when the
+        # event layers ran). Same truth ends as 3B, in model units.
+        w_hit = self.config.get('w_hit_endpoints', 0.0)
+        if w_hit > 0.0 and 'hit_endpoints' in outputs and 'tar_slice_start_x' in targets:
+            ends = torch.stack([
+                torch.stack([targets['tar_slice_start_x'], targets['tar_slice_start_y'],
+                             targets['tar_slice_start_z']], dim=1),
+                torch.stack([targets['tar_slice_stop_x'], targets['tar_slice_stop_y'],
+                             targets['tar_slice_stop_z']], dim=1),
+            ], dim=1)
+            for key, tag in (('hit_endpoints', 'hitep'), ('hit_endpoints_refined', 'hitepR')):
+                if key not in outputs:
+                    continue
+                l_hit, hit_breakdown = hit_endpoint_loss(
+                    outputs[key], outputs['hit_endpoint_pos'], outputs['hit_endpoint_view'],
+                    outputs['hit_endpoint_slice'], ends)
+                loss_dict[f'loss_{tag}'] = l_hit
+                for k, v in hit_breakdown.items():
+                    loss_dict[f'{tag}{k}'] = v
+                total_loss += w_hit * l_hit
             
         # 4. Positron Direction (Phase 11 — per-graph unit vector)
         w_angle = self.config.get('w_positron_angle', 0.0)
@@ -743,7 +900,8 @@ class PURITYLoss(nn.Module):
             if gate.any():
                 pred_dir = outputs['atar_positron_dir'][gate]
                 tar_dir = targets['tar_angle_vec_per_graph'][gate]
-                l_angle = (1.0 - F.cosine_similarity(pred_dir, tar_dir, dim=1)).mean()
+                w_ev = reg_w[gate]
+                l_angle = _weighted_mean(1.0 - F.cosine_similarity(pred_dir, tar_dir, dim=1), w_ev)
                 loss_dict['loss_positron_angle'] = l_angle
                 total_loss += w_angle * l_angle
                 # Per-epoch walk metric: coherent dz bias on MATCHED events only.
@@ -761,10 +919,10 @@ class PURITYLoss(nn.Module):
                     theta_true = torch.acos(tar_dir[:, 2].clamp(-1 + eps, 1 - eps))
                     residual = theta_pred - theta_true
 
-                    m0_batch = residual.mean()
-                    m1_batch = (residual * tar_dir[:, 2]).mean()
+                    m0_batch = _weighted_mean(residual, w_ev)
+                    m1_batch = _weighted_mean(residual * tar_dir[:, 2], w_ev)
                     cos2 = 2.0 * tar_dir[:, 2] ** 2 - 1.0
-                    m2_batch = (residual * cos2).mean()
+                    m2_batch = _weighted_mean(residual * cos2, w_ev)
 
                     a = self._decorr_alpha
                     m0_smooth = a * m0_batch + (1 - a) * self._m0_ema
@@ -868,7 +1026,8 @@ class PURITYLoss(nn.Module):
             if htp_rule is not None:
                 mask = mask * (htp_rule > 0.5).float()
 
-            denom = mask.sum().clamp(min=1.0)
+            mask = mask * reg_w.view_as(mask)
+            denom = mask.sum().clamp(min=1e-6)
             l_dead = (sq * mask).sum() / denom
 
             loss_dict['loss_dead_energy'] = l_dead

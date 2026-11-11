@@ -133,6 +133,45 @@ class QuantileOutputHead(nn.Module):
         
         return torch.cat([lower_vals, median.unsqueeze(-1), upper_vals], dim=-1)
 
+class HitEndpointHead(nn.Module):
+    """Per-hit endpoint candidates in the hit's own view.
+
+    For each of the slice's two ends (low-z, high-z) every ATAR hit emits a score (is this
+    the hit nearest that end?), an offset from its measured (transverse, z) position to the
+    end, and a width per coordinate. The offset lets the candidate extrapolate past the last
+    hit, e.g. into the gap a transverse track leaves in the view whose planes it skips.
+    Output [N, 2 ends, 5] = (score logit, offset_t, offset_z, sigma_t, sigma_z), positions in
+    the model's normalized units. Widths are floored at the measurement resolution.
+
+    With context_dim > 0 a slice-context vector is added to the first-layer pre-activation
+    through a zero-initialized projection, so a refinement head copied from a first-pass
+    head starts out reproducing it.
+    """
+    def __init__(self, input_dim, hidden_dim, sigma_floor, context_dim=0):
+        super().__init__()
+        self.fc_in = nn.Linear(input_dim, hidden_dim)
+        self.body = nn.Sequential(
+            nn.GELU(),
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.GELU(),
+            nn.Linear(hidden_dim // 2, 10),
+        )
+        self.register_buffer("sigma_floor", torch.as_tensor(sigma_floor, dtype=torch.float))
+        self.context = None
+        if context_dim > 0:
+            self.context = nn.Linear(context_dim, hidden_dim)
+            nn.init.zeros_(self.context.weight)
+            nn.init.zeros_(self.context.bias)
+
+    def forward(self, h, context=None):
+        pre = self.fc_in(h)
+        if self.context is not None and context is not None:
+            pre = pre + self.context(context)
+        raw = self.body(pre).view(-1, 2, 5)
+        sigma = self.sigma_floor + F.softplus(raw[..., 3:5])
+        return torch.cat([raw[..., 0:3], sigma], dim=-1)
+
+
 def build_atar_edge_attr(x, edge_index):
     """
     4D ATAR-only intra-slice edge features: [d_transverse, dz, dE, is_cross_view]

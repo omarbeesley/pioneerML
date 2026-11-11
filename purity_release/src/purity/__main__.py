@@ -84,7 +84,10 @@ def main():
     # All physics switches are set before model imports; inherited shell settings
     # cannot silently select a different architecture or acceptance convention.
     defaults = {"PURITY_GATE_MODE": "3d", "PURITY_BEST_XY_BETA": "0.5",
-                "PURITY_ROLE_FILM": "0", "PURITY_ENERGY_TIME_GATE_NS": "0"}
+                "PURITY_ROLE_FILM": "0", "PURITY_ENERGY_TIME_GATE_NS": "0",
+                "PURITY_GATE_DEADZONE_Z_MM": "0", "PURITY_GATE_DEADZONE_XY_MM": "0",
+                "PURITY_HIT_ENDPOINTS": "0", "PURITY_POS_TRIG_THR": "0.5",
+                "PURITY_POS_MIP_THR": "0.5", "PURITY_HTP_MIN_HITS": "2", "PURITY_DIR_HEADS": "0"}
     environment = defaults | {k: str(v) for k, v in cfg.get("environment", {}).items()}
     environment["PURITY_MAX_HITS"] = str(inference["max_hits"])
     os.environ.update(environment)

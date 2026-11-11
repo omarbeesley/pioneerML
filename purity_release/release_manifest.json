@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "created_utc": "2026-10-29T20:33:35.088355+00:00",
-  "scope": "Self-contained directory handoff preserving the inspected current main and tail implementations, including changes newer than the thesis, with local selected checkpoints, preparation, analysis and plotting. Current-source parity and isolated workflow checks passed. Thesis Chapters 5-6 provide a historical figure/result map; exact thesis replay is distinct from benchmarking the released source and is not required to preserve newer improvements. 2026-10-28: trimmed to models, inference and benchmarks, data preparation, training, the R_e/mu analysis and the tail cut chain (thesis figure reproduction moved to ../thesis_reproduction/); added trainers, training-data recipes and launchers and a stable event key; checkpoints are weights-only copies. See provenance/changes_20261028.json.",
+  "created_utc": "2026-11-11T17:53:25.470218+00:00",
+  "scope": "Self-contained directory handoff preserving the inspected current main and tail implementations, including changes newer than the thesis, with local selected checkpoints, preparation, analysis and plotting. Current-source parity and isolated workflow checks passed. Thesis Chapters 5-6 provide a historical figure/result map; exact thesis replay is distinct from benchmarking the released source and is not required to preserve newer improvements. 2026-10-28: trimmed to models, inference and benchmarks, data preparation, training, the R_e/mu analysis and the tail cut chain (thesis figure reproduction moved to ../thesis_reproduction/); added trainers, training-data recipes and launchers and a stable event key; checkpoints are weights-only copies. See provenance/changes_20261028.json. 2026-11-11: current reconstruction model main_xtal_pw20 epoch 20 with 25 direction heads (measured ATAR strip and LYSO crystal positions), its trainers and profile; see provenance/changes_20261111.json.",
   "files": [
     {
       "file": ".gitignore",
@@ -10,8 +10,8 @@
     },
     {
       "file": "README.md",
-      "bytes": 6244,
-      "sha256": "340ffb01878b5490ca832f87f638c3ba17e76ee1d3df493dc9399f05b9e7c463"
+      "bytes": 7660,
+      "sha256": "1b3bfe1a495838d0fe6d03bba8d8f8e9c3c7489b73f10c07ad422d51138049e8"
     },
     {
       "file": "assets/luts/atar_strips.npz",
@@ -22,6 +22,11 @@
       "file": "assets/luts/crystalLUT.npy",
       "bytes": 8528,
       "sha256": "4220e82fe5f9269d868fe13b02f08d0851db915379686e0cb22668c48ee38550"
+    },
+    {
+      "file": "assets/luts/lyso_crystal_polys.npz",
+      "bytes": 38820,
+      "sha256": "076502fb7804fbc8444986f7974ee5a27af3461aa3d7459cef9406564121260f"
     },
     {
       "file": "assets/luts/validLUT.npy",
@@ -39,9 +44,19 @@
       "sha256": "6e9ef16a981b3af186d817ecaa6573ce1c9989a36462ddc6fd0e467b129ee845"
     },
     {
+      "file": "checkpoints/main_xtal_pw20_epoch20_heads25.pth",
+      "bytes": 78708525,
+      "sha256": "aadb24807f747995967c5f7a32cda40201a4870987d3c002f8adb00fb5b53803"
+    },
+    {
       "file": "configs/main_filmg2_ep19.json",
       "bytes": 639,
       "sha256": "99fe45b9b78061981b0e83b2f62d3a11db792c609df26188c526994335921b76"
+    },
+    {
+      "file": "configs/main_xtal_pw20_ep20_heads25.json",
+      "bytes": 898,
+      "sha256": "3192ebe605351c1a98c847a0df40ddc7b740ecddd3b768c2587a09b647f43c45"
     },
     {
       "file": "configs/tail10_ep10.json",
@@ -85,8 +100,8 @@
     },
     {
       "file": "docs/training.md",
-      "bytes": 9967,
-      "sha256": "729664f4dcc58bf49a10a94ae113544a1bd3acddc8c0bfc08749ee2411d1de82"
+      "bytes": 14302,
+      "sha256": "ae0cb3a834eef8714c41467aa58d737747d0df3e2daca2f5c63a1b8d92f38b74"
     },
     {
       "file": "examples/michel.parquet",
@@ -124,6 +139,11 @@
       "sha256": "c3b9c6541b881e6c6eadecf9eb462f7ecca1c2cecd302f46c4f33f338a6789ac"
     },
     {
+      "file": "provenance/changes_20261111.json",
+      "bytes": 6030,
+      "sha256": "630fc4aeda824b011324d7417ffb3f61a5323c4c45dc57b3575b79da59895d43"
+    },
+    {
       "file": "provenance/diagnostics_export.json",
       "bytes": 3405,
       "sha256": "03341d23137146420b3d4596aa0f36ee7e326528bf8ec4d0ee9fa9f597fff8d3"
@@ -152,6 +172,11 @@
       "file": "provenance/main_artifacts.json",
       "bytes": 13207,
       "sha256": "841d00396238f3d4cb792d0633df33b07edf4656a5ce5ecfd0825c25fdeee02f"
+    },
+    {
+      "file": "provenance/main_xtal_pw20_artifacts.json",
+      "bytes": 4591,
+      "sha256": "8cb6ad19573ab09ea0a6ecee601cddcdf45bc12051ea840f24fcdef15630c5d8"
     },
     {
       "file": "provenance/mudif_tradeoff_export.json",
@@ -335,8 +360,8 @@
     },
     {
       "file": "scripts/slurm/train_main.sbatch",
-      "bytes": 2317,
-      "sha256": "4e2f0fdbd58675de49365da65d0d94def4d0d8428f2257d526a618aa5c03a778"
+      "bytes": 3429,
+      "sha256": "fc692147f47b052fa59f26941635df2dec3b749a13222cdf89062be5e8a52fc9"
     },
     {
       "file": "scripts/slurm/train_tail.sbatch",
@@ -355,8 +380,13 @@
     },
     {
       "file": "src/purity/__main__.py",
-      "bytes": 8746,
-      "sha256": "a64de0fe5c4f7d18794eebba64e00e4c6dd69e2dda2b9f8469ba9a00810ab364"
+      "bytes": 9004,
+      "sha256": "9ae013e8c84d5c88953fbb44106a894ac00383769e4d2ca3de87de2348320ed3"
+    },
+    {
+      "file": "src/purity/augment.py",
+      "bytes": 7378,
+      "sha256": "1ca36d79aaa44e024ab73ded3bc48af1a253c84da5faeb860284013579ef175b"
     },
     {
       "file": "src/purity/benchmark.py",
@@ -370,8 +400,8 @@
     },
     {
       "file": "src/purity/dataset.py",
-      "bytes": 34551,
-      "sha256": "8fb861674731a870b1a0417ae8f3a6d39445867bc9c5d5d621034e4fcc4d70d3"
+      "bytes": 35390,
+      "sha256": "647e74fd6de47f2e17004f2fa34db6ea3a4179fb08589a5600163002e235bb9b"
     },
     {
       "file": "src/purity/diagnostics/__init__.py",
@@ -545,13 +575,13 @@
     },
     {
       "file": "src/purity/models/layers.py",
-      "bytes": 7508,
-      "sha256": "97ea689e269adfaf662f97d6e61acefcbceb976ac2e6c3f3f030aef35482f7e1"
+      "bytes": 9356,
+      "sha256": "07f87ca3165b56f3bc8211e94f1aaddedca7fbe40518b7adb41d57f28f3deae6"
     },
     {
       "file": "src/purity/models/main.py",
-      "bytes": 102617,
-      "sha256": "991b3f65066db0a1f249ca707b10f79c0502247c3d1af33fd776a80b52a9bbf8"
+      "bytes": 116885,
+      "sha256": "fe2ddffd09c1978efc72cf389875dda843031e4fd0688c0490392222ad78a0df"
     },
     {
       "file": "src/purity/models/tail.py",
@@ -584,9 +614,19 @@
       "sha256": "7b576c10d81fb3823942b94da337a837d8b6c9f565548d54654a8dce8fa554a4"
     },
     {
+      "file": "src/purity/preprocessing/brem_donors.py",
+      "bytes": 4541,
+      "sha256": "659ecb962e7411f1210751d7c245a31a1e540f4181498d642bcc64eeb823af53"
+    },
+    {
       "file": "src/purity/preprocessing/build_atar_lut.py",
       "bytes": 1975,
       "sha256": "b51f7b0d31991dc7368ad35490035b311d80de2e458a5ffc8546f779ad8e042c"
+    },
+    {
+      "file": "src/purity/preprocessing/channel_merge.py",
+      "bytes": 10023,
+      "sha256": "a0cb0b5a553832a187bfc3e12675125c34de2109a8173f89d62ea6766d4862fc"
     },
     {
       "file": "src/purity/preprocessing/concat_clean.py",
@@ -609,6 +649,16 @@
       "sha256": "315c7d60163c4a24aa1c2af4fb47ab647dc1d338dbd18365670edaf994cad687"
     },
     {
+      "file": "src/purity/preprocessing/hard_event_flags.py",
+      "bytes": 6822,
+      "sha256": "b7e881fd936ea61bd6aae8d8b264b5a678b110aedb4d6ca2a802120d6bc2e462"
+    },
+    {
+      "file": "src/purity/preprocessing/lyso_crystal_positions.py",
+      "bytes": 8728,
+      "sha256": "10f1ec6e8647012be86850c84b972d83518ada76e6c9f447728aa15e330a4c2d"
+    },
+    {
       "file": "src/purity/preprocessing/mix_tail_shard.py",
       "bytes": 4107,
       "sha256": "f2b7fd22a52019f15083f219fa9f8a1628d7e11b167ae5ce2789245f47bcf455"
@@ -620,18 +670,18 @@
     },
     {
       "file": "src/purity/preprocessing/pileup_mixer.py",
-      "bytes": 54118,
-      "sha256": "80bb12dede03593798d8a05947b37091af84ae611ba6f3ad289939a2003ad470"
+      "bytes": 54652,
+      "sha256": "10abedbe9794fe33b9b147660cec474d7eccb0e632c6a1bce7a41ad740433d33"
     },
     {
       "file": "src/purity/preprocessing/root_to_parquet.py",
-      "bytes": 46301,
-      "sha256": "d0269e84ad52d92eb14c3af8bb68f1c9ef989d3be7ffa99a7c6a5fe137fcc886"
+      "bytes": 48466,
+      "sha256": "97c123b1c09dcf906e76aaa10c80e20182a49c3f54fcdaf4421534bc2de4c8b1"
     },
     {
       "file": "src/purity/train_utils.py",
-      "bytes": 51777,
-      "sha256": "d1671b05ca6aed8e5fbc6243a7394c3b63219ec38fbb2dbbf196be1463aeefdd"
+      "bytes": 61407,
+      "sha256": "7e8fc50908124f7854f521107da29f6614fa9640f63d57c21259b9e7558fac91"
     },
     {
       "file": "src/purity/training/__init__.py",
@@ -639,9 +689,39 @@
       "sha256": "2c77c328b4df0f50ec7b8aabcea16b3df7382f13b12e35c157a42250bb65ba47"
     },
     {
+      "file": "src/purity/training/direction_heads/__init__.py",
+      "bytes": 911,
+      "sha256": "8b4dc3abc5a6841084257e511a5e6b9879371fe6b795f2ed0aa5730b6e6035da"
+    },
+    {
+      "file": "src/purity/training/direction_heads/build_checkpoint.py",
+      "bytes": 2289,
+      "sha256": "7b9299a14a4adbf2223ca35dfa679e6287fb7f185f5dcfcbd91bbceb154fc90c"
+    },
+    {
+      "file": "src/purity/training/direction_heads/dirhead.py",
+      "bytes": 6503,
+      "sha256": "d96b12b88a09cd8ffc903a0ad76b151d94ec69c57630faa07b2e08d916ea0658"
+    },
+    {
+      "file": "src/purity/training/direction_heads/dump_inputs.py",
+      "bytes": 14338,
+      "sha256": "b2079d037717a60a4874d5f03e582d5fbe3f0cb562b36d560d1afd1537635209"
+    },
+    {
+      "file": "src/purity/training/direction_heads/train.py",
+      "bytes": 15088,
+      "sha256": "206d66ed3fb96b1fb4c0a2c24a98326785439e95f3303525c34ba0562bcda189"
+    },
+    {
+      "file": "src/purity/training/direction_heads/variants.json",
+      "bytes": 581,
+      "sha256": "8c0f5db53c9f5875edcc3b2e4f49c52c3082f73f351606fbfe6c54e80c46d5af"
+    },
+    {
       "file": "src/purity/training/main.py",
-      "bytes": 30060,
-      "sha256": "6dda58188c6bf0f98d22825f2ffa7aaec196ff4c7d1f14ce7a01e904678d63c5"
+      "bytes": 38617,
+      "sha256": "e9d010575c67211ed7232c822bcbf3e907e8013016afded4eeec1f1e20be2589"
     },
     {
       "file": "src/purity/training/tail.py",

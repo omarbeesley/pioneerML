@@ -1,0 +1,79 @@
+{
+ "schema_version": 1,
+ "date": "2026-11-11",
+ "summary": [
+  "Added the current reconstruction checkpoint main_xtal_pw20_epoch20_heads25.pth (weights only: main_xtal_pw20 epoch 20 + 25 direction heads) and its profile configs/main_xtal_pw20_ep20_heads25.json; results and lineage in provenance/main_xtal_pw20_artifacts.json.",
+  "models/main.py: optional direction-head ensemble (PURITY_DIR_HEADS, default 0 = unchanged); with N heads the event summary's polar angle and its theta < 120 deg acceptance use the average of their polar angles.",
+  "models/main.py: identification leniency settings PURITY_POS_TRIG_THR, PURITY_POS_MIP_THR, PURITY_HTP_MIN_HITS (defaults 0.5, 0.5, 2 = the trained behaviour); __main__.py pins them and PURITY_DIR_HEADS in every profile.",
+  "models/main.py, models/layers.py: hit-anchored endpoints (HitEndpointHead, PURITY_HIT_ENDPOINTS) and the gate dead zones used by the current model.",
+  "New package purity.training.direction_heads: dump the frozen network's head inputs, train sets of heads, build the checkpoint.",
+  "training/main.py, train_utils.py: hit-endpoint loss; --role_ce_positron_weight (the ramp target honours it), --chain_exclusive_anchor, --role_ce_focal_gamma, --role_lr / --role_group_builder, oversampling of flagged hard topologies (--oversample_flags / --oversample) and brem transplant augmentation (--brem_donors, purity.augment, preprocessing.brem_donors); defaults reproduce the previous trainer.",
+  "scripts/slurm/train_main.sbatch: passes exported PURITY_* settings and TRAIN_EXTRA; PHASE=3 trains the pw20 stage.",
+  "Preprocessing: LYSO hits at crystal positions (root_to_parquet; lyso_crystal_positions for existing parquets, with assets/luts/lyso_crystal_polys.npz), Geant4 centroids kept as lyso_truth_x/y/z and carried by the mixer; LYSO trigger threshold applied to merged crystal hits; channel_merge for hits one channel reads as a single pulse; hard_event_flags for oversampling.",
+  "README and docs/training.md describe the current model and its recipe."
+ ],
+ "modified": {
+  "README.md": {
+   "before": "340ffb01878b5490ca832f87f638c3ba17e76ee1d3df493dc9399f05b9e7c463",
+   "after": "1b3bfe1a495838d0fe6d03bba8d8f8e9c3c7489b73f10c07ad422d51138049e8"
+  },
+  "docs/training.md": {
+   "before": "729664f4dcc58bf49a10a94ae113544a1bd3acddc8c0bfc08749ee2411d1de82",
+   "after": "ae0cb3a834eef8714c41467aa58d737747d0df3e2daca2f5c63a1b8d92f38b74"
+  },
+  "scripts/slurm/train_main.sbatch": {
+   "before": "4e2f0fdbd58675de49365da65d0d94def4d0d8428f2257d526a618aa5c03a778",
+   "after": "fc692147f47b052fa59f26941635df2dec3b749a13222cdf89062be5e8a52fc9"
+  },
+  "src/purity/__main__.py": {
+   "before": "a64de0fe5c4f7d18794eebba64e00e4c6dd69e2dda2b9f8469ba9a00810ab364",
+   "after": "9ae013e8c84d5c88953fbb44106a894ac00383769e4d2ca3de87de2348320ed3"
+  },
+  "src/purity/dataset.py": {
+   "before": "8fb861674731a870b1a0417ae8f3a6d39445867bc9c5d5d621034e4fcc4d70d3",
+   "after": "647e74fd6de47f2e17004f2fa34db6ea3a4179fb08589a5600163002e235bb9b"
+  },
+  "src/purity/models/layers.py": {
+   "before": "97ea689e269adfaf662f97d6e61acefcbceb976ac2e6c3f3f030aef35482f7e1",
+   "after": "07f87ca3165b56f3bc8211e94f1aaddedca7fbe40518b7adb41d57f28f3deae6"
+  },
+  "src/purity/models/main.py": {
+   "before": "991b3f65066db0a1f249ca707b10f79c0502247c3d1af33fd776a80b52a9bbf8",
+   "after": "fe2ddffd09c1978efc72cf389875dda843031e4fd0688c0490392222ad78a0df"
+  },
+  "src/purity/preprocessing/pileup_mixer.py": {
+   "before": "80bb12dede03593798d8a05947b37091af84ae611ba6f3ad289939a2003ad470",
+   "after": "10abedbe9794fe33b9b147660cec474d7eccb0e632c6a1bce7a41ad740433d33"
+  },
+  "src/purity/preprocessing/root_to_parquet.py": {
+   "before": "d0269e84ad52d92eb14c3af8bb68f1c9ef989d3be7ffa99a7c6a5fe137fcc886",
+   "after": "97c123b1c09dcf906e76aaa10c80e20182a49c3f54fcdaf4421534bc2de4c8b1"
+  },
+  "src/purity/train_utils.py": {
+   "before": "d1671b05ca6aed8e5fbc6243a7394c3b63219ec38fbb2dbbf196be1463aeefdd",
+   "after": "7e8fc50908124f7854f521107da29f6614fa9640f63d57c21259b9e7558fac91"
+  },
+  "src/purity/training/main.py": {
+   "before": "6dda58188c6bf0f98d22825f2ffa7aaec196ff4c7d1f14ce7a01e904678d63c5",
+   "after": "e9d010575c67211ed7232c822bcbf3e907e8013016afded4eeec1f1e20be2589"
+  }
+ },
+ "added": {
+  "assets/luts/lyso_crystal_polys.npz": "076502fb7804fbc8444986f7974ee5a27af3461aa3d7459cef9406564121260f",
+  "checkpoints/main_xtal_pw20_epoch20_heads25.pth": "aadb24807f747995967c5f7a32cda40201a4870987d3c002f8adb00fb5b53803",
+  "configs/main_xtal_pw20_ep20_heads25.json": "3192ebe605351c1a98c847a0df40ddc7b740ecddd3b768c2587a09b647f43c45",
+  "provenance/main_xtal_pw20_artifacts.json": "8cb6ad19573ab09ea0a6ecee601cddcdf45bc12051ea840f24fcdef15630c5d8",
+  "src/purity/augment.py": "1ca36d79aaa44e024ab73ded3bc48af1a253c84da5faeb860284013579ef175b",
+  "src/purity/preprocessing/brem_donors.py": "659ecb962e7411f1210751d7c245a31a1e540f4181498d642bcc64eeb823af53",
+  "src/purity/preprocessing/channel_merge.py": "a0cb0b5a553832a187bfc3e12675125c34de2109a8173f89d62ea6766d4862fc",
+  "src/purity/preprocessing/hard_event_flags.py": "b7e881fd936ea61bd6aae8d8b264b5a678b110aedb4d6ca2a802120d6bc2e462",
+  "src/purity/preprocessing/lyso_crystal_positions.py": "10f1ec6e8647012be86850c84b972d83518ada76e6c9f447728aa15e330a4c2d",
+  "src/purity/training/direction_heads/__init__.py": "8b4dc3abc5a6841084257e511a5e6b9879371fe6b795f2ed0aa5730b6e6035da",
+  "src/purity/training/direction_heads/build_checkpoint.py": "7b9299a14a4adbf2223ca35dfa679e6287fb7f185f5dcfcbd91bbceb154fc90c",
+  "src/purity/training/direction_heads/dirhead.py": "d96b12b88a09cd8ffc903a0ad76b151d94ec69c57630faa07b2e08d916ea0658",
+  "src/purity/training/direction_heads/dump_inputs.py": "b2079d037717a60a4874d5f03e582d5fbe3f0cb562b36d560d1afd1537635209",
+  "src/purity/training/direction_heads/train.py": "206d66ed3fb96b1fb4c0a2c24a98326785439e95f3303525c34ba0562bcda189",
+  "src/purity/training/direction_heads/variants.json": "8c0f5db53c9f5875edcc3b2e4f49c52c3082f73f351606fbfe6c54e80c46d5af"
+ },
+ "removed": {}
+}

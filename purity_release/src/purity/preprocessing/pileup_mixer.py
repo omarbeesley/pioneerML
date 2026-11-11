@@ -136,6 +136,9 @@ def extract_hits(row, pdg_mask_keep, origin_val, dt_offset=0.0, exclude_mask=0):
         'x': np.array(row['lyso_x'])[keep_lyso].tolist(),
         'y': np.array(row['lyso_y'])[keep_lyso].tolist(),
         'z': np.array(row['lyso_z'])[keep_lyso].tolist(),
+        'truth_x': np.array(row['lyso_truth_x'] if 'lyso_truth_x' in row else row['lyso_x'])[keep_lyso].tolist(),
+        'truth_y': np.array(row['lyso_truth_y'] if 'lyso_truth_y' in row else row['lyso_y'])[keep_lyso].tolist(),
+        'truth_z': np.array(row['lyso_truth_z'] if 'lyso_truth_z' in row else row['lyso_z'])[keep_lyso].tolist(),
         't': lyso_t_shifted[keep_lyso].tolist(),
         'E': np.array(row['lyso_E'])[keep_lyso].tolist(),
         'pdg': lyso_pdgs[keep_lyso].tolist(),
@@ -294,6 +297,9 @@ class PileupMixer:
             'x': xyz_positions[:, 0].tolist(),
             'y': xyz_positions[:, 1].tolist(),
             'z': xyz_positions[:, 2].tolist(),
+            'truth_x': xyz_positions[:, 0].tolist(),
+            'truth_y': xyz_positions[:, 1].tolist(),
+            'truth_z': xyz_positions[:, 2].tolist(),
             't': bkg_times.tolist(),
             'E': bkg_energies.tolist(),
             'pdg': [OTHER] * n_hits, # Placeholder PDG (usually beta)
@@ -488,7 +494,7 @@ class PileupMixer:
                     out_row[_scalar_col] = float(main_row[_scalar_col])
             
             atar_hits = {k: [] for k in ['x', 'y', 'z', 'truth_x', 'truth_y', 'truth_z', 't', 'truth_t', 'E', 'view', 'pdg', 'slice_id', 'slice_mean_t', 'origin']}
-            lyso_hits = {k: [] for k in ['x', 'y', 'z', 't', 'E', 'pdg', 'slice_id', 'slice_mean_t', 'origin']}
+            lyso_hits = {k: [] for k in ['x', 'y', 'z', 'truth_x', 'truth_y', 'truth_z', 't', 'E', 'pdg', 'slice_id', 'slice_mean_t', 'origin']}
             
             a_main, l_main = extract_hits(main_row, 0xFFFFFFFF, origin_val=0, dt_offset=0.0)
             

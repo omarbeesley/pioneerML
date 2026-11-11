@@ -63,6 +63,10 @@ MASK_TO_PDG = {
     PION: 211, MUON: -13, POSITRON: -11, ELECTRON: 11, GAMMA: 22, OTHER: 98105
 }
 
+# LYSO digitizer trigger threshold (MeV), on a crystal's merged (smeared) hit energy: a hit
+# below it is not recorded. The mixer drops radioactivity below the same value.
+LYSO_TRIG_E = 0.20
+
 def pdg_to_mask(pdg_id):
     if pdg_id == 211: return PION
     elif pdg_id == -13: return MUON
@@ -111,6 +115,9 @@ def smear_atar(energy, energy_resolution=0.15):
     return smeared_energy
 
 
+# Scale from a LYSO crystal's GeoHeader centre to its shower maximum, where its hits are placed.
+LYSO_SHOWER_MAX = 1.19
+
 PARQUET_NAMES = [
     'event_id',
     'truth_theta', 'truth_phi', 'truth_positron_energy',
@@ -126,6 +133,9 @@ PARQUET_NAMES = [
     # energy-weighted Geant4 deposit centroid is kept as truth in atar_truth_x/y/z.
     'atar_truth_x', 'atar_truth_y', 'atar_truth_z',
     'lyso_x', 'lyso_y', 'lyso_z', 'lyso_t', 'lyso_E', 'lyso_pdg',
+    # LYSO positions: lyso_x/y/z are the crystal position (centre x LYSO_SHOWER_MAX); the
+    # energy-weighted Geant4 deposit centroid is kept as truth in lyso_truth_x/y/z.
+    'lyso_truth_x', 'lyso_truth_y', 'lyso_truth_z',
     'dead_E',
     'atar_posE',
     'live_E',
@@ -156,7 +166,8 @@ PARQUET_TYPES['event_type'] = pa.int64()
 PARQUET_TYPES['dtar_triggered'] = pa.int64()
 for _c in ('atar_x', 'atar_y', 'atar_z', 'atar_t', 'atar_truth_t', 'atar_E',
            'atar_truth_x', 'atar_truth_y', 'atar_truth_z',
-           'lyso_x', 'lyso_y', 'lyso_z', 'lyso_t', 'lyso_E'):
+           'lyso_x', 'lyso_y', 'lyso_z', 'lyso_t', 'lyso_E',
+           'lyso_truth_x', 'lyso_truth_y', 'lyso_truth_z'):
     PARQUET_TYPES[_c] = _LIST_F64
 for _c in ('atar_view', 'atar_pdg', 'atar_slice_id', 'lyso_pdg'):
     PARQUET_TYPES[_c] = _LIST_I64
@@ -191,6 +202,16 @@ def process_root_file(file_list, geoheader, output_file, max_events=None, shard_
     # Static ATAR strip geometry (view, measured x, measured y, plane z) by volume id,
     # looked up once per strip rather than per hit.
     atar_strip_geo = {}
+    # A LYSO crystal measures only that it fired: every hit in it sits at the crystal centre
+    # scaled to shower maximum (LYSO_SHOWER_MAX), by volume id.
+    lyso_crystal_pos = {}
+
+    def crystal_position(c_id):
+        if c_id not in lyso_crystal_pos:
+            xyz = geoheader.GetCentre(c_id)
+            lyso_crystal_pos[c_id] = (float(xyz.X()) * LYSO_SHOWER_MAX, float(xyz.Y()) * LYSO_SHOWER_MAX,
+                                      float(xyz.Z()) * LYSO_SHOWER_MAX)
+        return lyso_crystal_pos[c_id]
 
     chain = _root().TChain("sim")
     if isinstance(file_list, str):
@@ -455,10 +476,10 @@ def process_root_file(file_list, geoheader, output_file, max_events=None, shard_
             #   2. Apply σ_E and σ_t smearing using TRUTH energy. Both σs scale
             #      with photon statistics N ∝ truth E, so smearing must be
             #      parametrised by truth, not by the σ_E-noisy "measured" E.
-            #   3. Apply the trigger threshold LYSO_TRIG_E to the *smeared*
-            #      energy, mimicking what a real digitizer does.
+            #   3. The trigger threshold LYSO_TRIG_E is applied later, to each
+            #      crystal hit after all its deposits are merged (a digitizer
+            #      triggers on the pulse, not on one particle's share of it).
             LYSO_PRE_SMEAR_E = 0.05   # MeV — coarse "real deposit" sanity floor
-            LYSO_TRIG_E      = 0.20   # MeV — digitizer trigger threshold (post-smear)
             if len(lyso_indices) > 0:
                 keep = sum_e[lyso_indices] > LYSO_PRE_SMEAR_E
                 lyso_indices = lyso_indices[keep]
@@ -487,13 +508,8 @@ def process_root_file(file_list, geoheader, output_file, max_events=None, shard_
                                   + 75**2) / 1000.0
                 avg_t[lyso_indices] += np.random.normal(0, sigma_t)
 
-                # Trigger threshold applied to smeared (measured) E. Hits whose
-                # smeared signal falls below trigger don't get recorded.
-                survive = sum_e[lyso_indices] > LYSO_TRIG_E
-                lyso_indices = lyso_indices[survive]
-
             def merge_hit(hit_list, new_hit, merge_window):
-                for hit in hit_list:
+                for pos, hit in enumerate(hit_list):
                     if abs(hit['t'] - new_hit['t']) < merge_window:
                         # Energy-weighted merge
                         e_tot = hit['E'] + new_hit['E']
@@ -515,6 +531,12 @@ def process_root_file(file_list, geoheader, output_file, max_events=None, shard_
                         hit['E'] = e_tot
                         # Bitwise OR for PDGs if multiple particles hit same strip AT EXACT SAME TIME
                         hit['pdg_mask'] |= new_hit['pdg_mask']
+                        # The merged hit's time has moved, so it may now lie within the
+                        # window of another hit already in this channel: take it out and
+                        # merge it in again. No two hits of a channel are then ever within
+                        # the window of each other (a single pass left such pairs).
+                        hit_list.pop(pos)
+                        merge_hit(hit_list, hit, merge_window)
                         return
                 hit_list.append(new_hit)
 
@@ -547,7 +569,10 @@ def process_root_file(file_list, geoheader, output_file, max_events=None, shard_
                     
                 # LYSO CALORIMETER PROCESSING
                 elif is_lyso_lookup[idx]:
-                    new_hit = {'x': float(ax), 'y': float(ay), 'z': float(az), 't': max(float(at), 0.05), 'truth_t': max(float(truth_t[idx]), 0.05), 'E': float(se), 'pdg_mask': pdg_mask}
+                    cx, cy, cz = crystal_position(v_id)
+                    new_hit = {'x': cx, 'y': cy, 'z': cz,
+                               'truth_x': float(ax), 'truth_y': float(ay), 'truth_z': float(az),
+                               't': max(float(at), 0.05), 'truth_t': max(float(truth_t[idx]), 0.05), 'E': float(se), 'pdg_mask': pdg_mask}
                     if v_id not in event_hits_lyso: event_hits_lyso[v_id] = []
                     merge_hit(event_hits_lyso[v_id], new_hit, merge_window=10.0)
 
@@ -584,11 +609,9 @@ def process_root_file(file_list, geoheader, output_file, max_events=None, shard_
             pdg = crystal.GetPDGID()
             pdg_mask = pdg_to_mask(pdg)
 
-            xyz = geoheader.GetCentre(c_id)
-            # Use same SCALE_FACTOR (1.19) from old script to map front-face to shower max
-            x, y, z = xyz.X() * 1.19, xyz.Y() * 1.19, xyz.Z() * 1.19
-
-            new_hit = {'x': float(x), 'y': float(y), 'z': float(z),
+            # no Geant4 step positions for an untracked deposit: truth is the crystal position too
+            x, y, z = crystal_position(c_id)
+            new_hit = {'x': x, 'y': y, 'z': z, 'truth_x': x, 'truth_y': y, 'truth_z': z,
                        't': float(t), 'truth_t': float(t),
                        'E': float(edep_residual), 'pdg_mask': pdg_mask}
 
@@ -614,11 +637,20 @@ def process_root_file(file_list, geoheader, output_file, max_events=None, shard_
                 evt_atar_pdg.append(h['pdg_mask'])
 
         evt_lyso_x, evt_lyso_y, evt_lyso_z, evt_lyso_E, evt_lyso_t, evt_lyso_pdg = [], [], [], [], [], []
+        evt_lyso_truth_x, evt_lyso_truth_y, evt_lyso_truth_z = [], [], []
         for v_id, hits in event_hits_lyso.items():
             for h in hits:
+                # The trigger threshold. It was once applied per deposit, to an index
+                # list the merge loop never read, so no LYSO hit was ever dropped
+                # (about 20% of the trigger hits in older parquets lie below it).
+                if h['E'] <= LYSO_TRIG_E:
+                    continue
                 evt_lyso_x.append(h['x'])
                 evt_lyso_y.append(h['y'])
                 evt_lyso_z.append(h['z'])
+                evt_lyso_truth_x.append(h['truth_x'])
+                evt_lyso_truth_y.append(h['truth_y'])
+                evt_lyso_truth_z.append(h['truth_z'])
                 evt_lyso_t.append(h['t'])
                 evt_lyso_E.append(h['E'])
                 evt_lyso_pdg.append(h['pdg_mask'])
@@ -704,6 +736,9 @@ def process_root_file(file_list, geoheader, output_file, max_events=None, shard_
         acc['lyso_E'].append(evt_lyso_E)
         acc['lyso_t'].append(evt_lyso_t)
         acc['lyso_pdg'].append(evt_lyso_pdg)
+        acc['lyso_truth_x'].append(evt_lyso_truth_x)
+        acc['lyso_truth_y'].append(evt_lyso_truth_y)
+        acc['lyso_truth_z'].append(evt_lyso_truth_z)
 
         acc['dead_E'].append(float(evt_dead_E))
 

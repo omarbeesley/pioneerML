@@ -16,6 +16,26 @@ import os
 # The pinned main profile selects best_xy with beta=0.5; values below are fallbacks.
 _GATE_MODE = os.environ.get("PURITY_GATE_MODE", "3d")
 BEST_XY_BETA = float(os.environ.get("PURITY_BEST_XY_BETA", "0.5"))
+# Endpoint offsets up to these tolerances (mm) cost nothing in the gate; only the excess is
+# divided by the predicted widths, so small offsets keep full attention even when the widths
+# are underestimated. 0 (the fallback) reproduces the trained gate exactly.
+GATE_DEADZONE_Z_MM = float(os.environ.get("PURITY_GATE_DEADZONE_Z_MM", "0") or 0.0)
+GATE_DEADZONE_XY_MM = float(os.environ.get("PURITY_GATE_DEADZONE_XY_MM", "0") or 0.0)
+
+# Hit-anchored endpoints replace the slice-level endpoint regression in the gate. Every
+# ATAR hit proposes each slice end as its own position plus an offset (HitEndpointHead);
+# the gate compares the best-scored candidates of two slices within ONE view at a time
+# (that view's transverse coordinate and z), so a slice matches through whichever view
+# sees the connection. After the first cross-slice attention layer the candidates are
+# rescored from the context-aware slice tokens and the gate is rebuilt; with the role
+# FiLM, the match quality to each slice's best partner also conditions the role head.
+# It adds parameters, so the setting must match the checkpoint (0 for all models
+# trained before 2026-11).
+_HIT_ENDPOINTS = os.environ.get("PURITY_HIT_ENDPOINTS", "0") == "1"
+HIT_GATE_TOP_K = 3           # candidates per slice, view and end entering the gate
+STRIP_PITCH_MM = 0.2
+PLANE_THICKNESS_MM = 0.12
+N_MATCH_FEATURES = 9
 
 # Role FiLM replaces raw endpoint-delta concatenation with modulation of the
 # role head by bounded z differences. It changes parameter structure, so the
@@ -28,13 +48,31 @@ Z_CHAIN_BOUND_MM = 1.05  # z-difference normalization for the role FiLM features
 # Set all profile environment values before importing this module.
 _E_TIME_GATE_NS = float(os.environ.get("PURITY_ENERGY_TIME_GATE_NS", "0") or 0.0)
 
-from torch_geometric.utils import to_dense_batch
+# Leniency of the positron identification, an inference setting (the defaults are what every
+# model was trained with). An ATAR hit is a positron hit when its slice's trigger probability
+# exceeds PURITY_POS_TRIG_THR and its MIP probability exceeds PURITY_POS_MIP_THR; an event has a
+# trigger positron when one slice holds at least PURITY_HTP_MIN_HITS positron hits. The same
+# positron hits feed the direction, time and energy, so all of them follow these values.
+_POS_TRIG_THR = float(os.environ.get("PURITY_POS_TRIG_THR", "0.5") or 0.5)
+_POS_MIP_THR = float(os.environ.get("PURITY_POS_MIP_THR", "0.5") or 0.5)
+_HTP_MIN_HITS = float(os.environ.get("PURITY_HTP_MIN_HITS", "2") or 2.0)
+
+# Direction-head ensemble, an inference setting. PURITY_DIR_HEADS = N > 0 adds N direction heads,
+# each shaped like dir_attn_pool + positron_dir_head and trained afterwards on the frozen network
+# (purity.training.direction_heads). Each reads the same positron-tagged hits and pion stop as the
+# network's own head; their polar angles are averaged, and the event summary's polar angle and
+# its theta < 120 degree acceptance use that average. Everything else that uses the positron
+# direction (LYSO matching, dead-material energy) keeps the network's own head. 0 = off.
+_DIR_HEADS = int(os.environ.get("PURITY_DIR_HEADS", "0") or 0)
+
+from torch_geometric.utils import to_dense_batch, scatter
 from torch_geometric.nn import global_max_pool, global_add_pool, AttentionalAggregation
 
 from .layers import (
     JointAttentionBlock,
     VectorHead,
     QuantileOutputHead,
+    HitEndpointHead,
     physics_edge_index_batch,
     build_atar_edge_attr,
     build_lyso_edge_attr,
@@ -54,6 +92,13 @@ if hasattr(torch.backends, "mha") and hasattr(torch.backends.mha, "set_fastpath_
     torch.backends.mha.set_fastpath_enabled(False)
 
 _ACCEPT_ANGLE_COS = math.cos(math.radians(ACCEPT_ANGLE_MAX_DEG))
+
+
+def _group_log_softmax(scores, group, n_groups):
+    """Log-softmax of scores [n, C] over the rows sharing a group index, per column."""
+    top = scatter(scores.detach(), group, dim=0, dim_size=n_groups, reduce='max')
+    lse = scatter((scores - top[group]).exp(), group, dim=0, dim_size=n_groups, reduce='sum')
+    return scores - top[group] - lse.clamp(min=1e-30).log()[group]
 
 
 class PURITYModel(nn.Module):
@@ -545,6 +590,111 @@ class PURITYModel(nn.Module):
                 nn.Linear(D_A // 2, 3),
             )
 
+        # Hit-anchored endpoints (see the _HIT_ENDPOINTS setting above). Registered last
+        # so models without them keep their parameter order and initialization.
+        if _HIT_ENDPOINTS:
+            floor = [STRIP_PITCH_MM / math.sqrt(12.0) / NORM_POS_ATAR,
+                     PLANE_THICKNESS_MM / math.sqrt(12.0) / NORM_POS_ATAR]
+            self.hit_endpoint_head = HitEndpointHead(jk_dim, hidden_dim, floor)
+            # The refinement starts as a copy of the first pass; its slice-context input
+            # is zero-initialized, so before training it reproduces the first pass.
+            self.hit_endpoint_refine = HitEndpointHead(jk_dim, hidden_dim, floor, context_dim=D_A)
+            self.hit_endpoint_refine.load_state_dict(self.hit_endpoint_head.state_dict(), strict=False)
+            if _ROLE_FILM:
+                # Match evidence enters the FiLM first layer through zero-initialized
+                # weights, i.e. as extra FiLM inputs that start out ignored.
+                self.atar_role_film_match = nn.Linear(N_MATCH_FEATURES, 64)
+                nn.init.zeros_(self.atar_role_film_match.weight)
+                nn.init.zeros_(self.atar_role_film_match.bias)
+
+        # Direction-head ensemble (see the _DIR_HEADS setting above): copies of the direction head,
+        # trained afterwards on the frozen network. Registered last so the rest of the model keeps
+        # its parameter order and initialization.
+        self.dir_ensemble = nn.ModuleList([
+            nn.ModuleDict({
+                'dir_attn_pool': AttentionalAggregation(gate_nn=nn.Sequential(
+                    nn.Linear(jk_dim, hidden_dim), nn.GELU(), nn.Linear(hidden_dim, 1))),
+                'positron_dir_head': nn.Sequential(
+                    nn.Linear(dir_input_dim, hidden_dim * 2), nn.GELU(),
+                    nn.Linear(hidden_dim * 2, hidden_dim), nn.GELU(), nn.Linear(hidden_dim, 3)),
+            }) for _ in range(_DIR_HEADS)])
+
+    def _hit_endpoint_gate(self, hit_ep, hit_pos, hit_group, n_slices, sort_idx, sorted_batch,
+                           inverse_sort):
+        """Endpoint-compatibility attention bias from hit-anchored candidates.
+
+        hit_ep [n, 2, 5] from HitEndpointHead, hit_pos [n, 2] = (transverse, z) of each ATAR
+        hit, hit_group = slice rank * 2 + view. For each pair of slices and each view the
+        candidates of both slices are compared in that view's transverse coordinate and z:
+            g = log s_i + log s_j - chi2(i, j),
+        with log s the hit's log-probability of being its (slice, view) end, and the bias is
+        the soft maximum of g over views, end pairings and the top HIT_GATE_TOP_K candidates.
+        Returns the dense bias [B, N, N] (sorted slice order, as the event layers use) and,
+        per slice in input order, detached features of the match to its best partner slice.
+        """
+        K = HIT_GATE_TOP_K
+        dev = hit_ep.device
+        n_groups = 2 * n_slices
+        logp = _group_log_softmax(hit_ep[..., 0], hit_group, n_groups)        # [n, 2 ends]
+        feats = torch.cat([logp.unsqueeze(-1), hit_pos.unsqueeze(1) + hit_ep[..., 1:3],
+                           hit_ep[..., 3:5]], dim=-1)                          # [n, 2, 5]
+
+        # Top-K candidates per (slice, view, end): order by group, then by score.
+        table = hit_ep.new_zeros(n_groups, 2, K, 5)
+        valid = torch.zeros(n_groups, 2, K, dtype=torch.bool, device=dev)
+        position = torch.arange(hit_group.numel(), device=dev)
+        for e in range(2):
+            order = torch.argsort(-logp[:, e].detach())
+            order = order[torch.argsort(hit_group[order], stable=True)]
+            g_sorted = hit_group[order]
+            rank = position - torch.searchsorted(g_sorted, g_sorted)
+            keep = rank < K
+            table[g_sorted[keep], e, rank[keep]] = feats[order[keep], e]
+            valid[g_sorted[keep], e, rank[keep]] = True
+
+        table = table.view(n_slices, -1)[sort_idx]
+        valid = valid.view(n_slices, -1)[sort_idx]
+        dense, _ = to_dense_batch(table, sorted_batch)
+        dense_ok, _ = to_dense_batch(valid.float(), sorted_batch)
+        dense_ok = dense_ok > 0.5
+        B, N = dense.shape[0], dense.shape[1]
+        dense = dense.view(B, N, 2, 2, K, 5)
+        dense_ok = dense_ok.view(B, N, 2, 2, K)
+
+        # Pair axes: [B, a, b, view, end_a, end_b, cand_a, cand_b]
+        A = dense[:, :, None, :, :, None, :, None, :]
+        Bc = dense[:, None, :, :, None, :, None, :, :]
+        ok = (dense_ok[:, :, None, :, :, None, :, None]
+              & dense_ok[:, None, :, :, None, :, None, :])
+        d_t = (A[..., 1] - Bc[..., 1]).abs()
+        d_z = (A[..., 2] - Bc[..., 2]).abs()
+        tol_t = GATE_DEADZONE_XY_MM / NORM_POS_ATAR
+        tol_z = GATE_DEADZONE_Z_MM / NORM_POS_ATAR
+        alpha = F.softplus(self.kernel_alpha)
+        alpha_t = alpha[:2].view(1, 1, 1, 2, 1, 1, 1, 1)                       # x for XZ, y for YZ
+        chi2 = (alpha_t * F.relu(d_t - tol_t) ** 2 / (A[..., 3] ** 2 + Bc[..., 3] ** 2 + 1e-6)
+                + alpha[2] * F.relu(d_z - tol_z) ** 2 / (A[..., 4] ** 2 + Bc[..., 4] ** 2 + 1e-6))
+        g = (A[..., 0] + Bc[..., 0] - chi2).masked_fill(~ok, -1e4)
+        bias = torch.logsumexp(g.flatten(3), dim=-1).clamp(min=-50.0)
+
+        # Match evidence for the role head: per view, the score-weighted chi2 and offsets of
+        # the best candidate pairing, averaged over partner slices weighted by their bias.
+        with torch.no_grad():
+            gv = g.flatten(4)                                                  # [B, a, b, view, M]
+            p = torch.softmax(gv, dim=-1)
+            view_ok = ok.flatten(4).any(-1).float()                            # [B, a, b, view]
+            per_view = [torch.log1p((p * chi2.flatten(4)).sum(-1)),
+                        torch.log1p((p * d_t.flatten(4)).sum(-1) * NORM_POS_ATAR),
+                        torch.log1p((p * d_z.flatten(4)).sum(-1) * NORM_POS_ATAR)]
+            per_view = torch.stack(per_view, dim=-1) * view_ok.unsqueeze(-1)   # [B, a, b, view, 3]
+            pair_feats = torch.cat([per_view.flatten(-2), view_ok, bias.unsqueeze(-1) / 10.0], dim=-1)
+            _, slice_ok = to_dense_batch(table[:, :1], sorted_batch)
+            partner = slice_ok[:, None, :] & ~torch.eye(N, dtype=torch.bool, device=dev)[None]
+            w = torch.softmax(bias.masked_fill(~partner, -1e9), dim=-1) * partner.float()
+            match = (w.unsqueeze(-1) * pair_feats).sum(dim=2)                   # [B, a, 9]
+            match = match[slice_ok][inverse_sort]
+        return bias, match
+
     def forward(self, x, batch, task_weights=None, triggering_pion_slice=None,
                 truth_positron_mask=None):
         if task_weights is None:
@@ -828,6 +978,22 @@ class PURITYModel(nn.Module):
             output['num_graphs_in_batch'] = num_graphs_in_batch
             output['num_slices_max'] = num_slices_max
 
+            if _HIT_ENDPOINTS:
+                # First-pass hit candidates. Hits address slices by their rank among the
+                # valid slices (the row order of every slice-level output).
+                n_valid_slices = int(valid_slice_mask.sum().item())
+                slice_rank = torch.full((num_global_slices,), -1, dtype=torch.long, device=x.device)
+                slice_rank[valid_slice_mask] = torch.arange(n_valid_slices, device=x.device)
+                hit_view = is_atar_y[is_atar].long()
+                hit_slice = slice_rank[global_slice_idx_all]
+                hit_group = hit_slice * 2 + hit_view
+                hit_pos = torch.stack([torch.where(hit_view.bool(), x[is_atar, 1], x[is_atar, 0]),
+                                       x[is_atar, 2]], dim=-1)
+                output['hit_endpoints'] = self.hit_endpoint_head(h_atar)
+                output['hit_endpoint_pos'] = hit_pos
+                output['hit_endpoint_view'] = hit_view
+                output['hit_endpoint_slice'] = hit_slice
+
             # --- ATAR Event Builder Early Fusion (stereo) ---
             endpoints_all = output['atar_endpoints']
             endpoints_xz_flat = endpoints_all[:, :, [0, 2], :].reshape(endpoints_all.size(0), -1)
@@ -897,54 +1063,75 @@ class PURITYModel(nn.Module):
                 from torch_geometric.utils import to_dense_batch
                 dense_atar9, pad_mask9 = to_dense_batch(sorted_tokens9, sorted_batch9)
 
-                # Endpoint-compatibility kernel as attention bias
+                B_size, N_max = dense_atar9.shape[0], dense_atar9.shape[1]
+                inverse_sort9 = torch.argsort(sort_idx_atar9)
                 endpoint_mean = endpoints_all[..., 1]
-                endpoint_sigma = 0.5 * (endpoints_all[..., 2] - endpoints_all[..., 0]).abs().clamp(min=1e-3)
+                match_feats = None
 
-                mean_sorted = endpoint_mean[sort_idx_atar9].reshape(-1, 6)
-                sigma_sorted = endpoint_sigma[sort_idx_atar9].reshape(-1, 6)
-                dense_mean_flat, _ = to_dense_batch(mean_sorted, sorted_batch9)
-                dense_sigma_flat, _ = to_dense_batch(sigma_sorted, sorted_batch9)
-                B_size, N_max = dense_mean_flat.shape[0], dense_mean_flat.shape[1]
-                dense_mean = dense_mean_flat.view(B_size, N_max, 2, 3)
-                dense_sigma = dense_sigma_flat.view(B_size, N_max, 2, 3)
-
-                m_i = dense_mean.unsqueeze(2).unsqueeze(4)
-                m_j = dense_mean.unsqueeze(1).unsqueeze(3)
-                s_i = dense_sigma.unsqueeze(2).unsqueeze(4)
-                s_j = dense_sigma.unsqueeze(1).unsqueeze(3)
-                delta_sq = (m_i - m_j) ** 2
-                var_sum = s_i ** 2 + s_j ** 2 + 1e-6
-
-                alpha = F.softplus(self.kernel_alpha).view(1, 1, 1, 1, 1, 3)
-                neg_chi2 = -(delta_sq / var_sum) * alpha
-                if _GATE_MODE == "best_xy":
-                    # z + majority-weighted BETTER of the two transverse views (ignore the bad one)
-                    g_per_pair = neg_chi2[..., 2] + BEST_XY_BETA * torch.maximum(neg_chi2[..., 0], neg_chi2[..., 1])
+                if _HIT_ENDPOINTS:
+                    kernel_bias, _ = self._hit_endpoint_gate(
+                        output['hit_endpoints'], hit_pos, hit_group, n_valid_slices,
+                        sort_idx_atar9, sorted_batch9, inverse_sort9)
                 else:
-                    g_per_pair = neg_chi2.sum(dim=-1)
-                kernel_bias = torch.logsumexp(g_per_pair.flatten(-2, -1), dim=-1)
-                kernel_bias = kernel_bias.clamp(min=-50.0)
+                    # Endpoint-compatibility kernel as attention bias
+                    endpoint_sigma = 0.5 * (endpoints_all[..., 2] - endpoints_all[..., 0]).abs().clamp(min=1e-3)
+
+                    mean_sorted = endpoint_mean[sort_idx_atar9].reshape(-1, 6)
+                    sigma_sorted = endpoint_sigma[sort_idx_atar9].reshape(-1, 6)
+                    dense_mean_flat, _ = to_dense_batch(mean_sorted, sorted_batch9)
+                    dense_sigma_flat, _ = to_dense_batch(sigma_sorted, sorted_batch9)
+                    dense_mean = dense_mean_flat.view(B_size, N_max, 2, 3)
+                    dense_sigma = dense_sigma_flat.view(B_size, N_max, 2, 3)
+
+                    m_i = dense_mean.unsqueeze(2).unsqueeze(4)
+                    m_j = dense_mean.unsqueeze(1).unsqueeze(3)
+                    s_i = dense_sigma.unsqueeze(2).unsqueeze(4)
+                    s_j = dense_sigma.unsqueeze(1).unsqueeze(3)
+                    delta_sq = (m_i - m_j) ** 2
+                    if GATE_DEADZONE_Z_MM > 0 or GATE_DEADZONE_XY_MM > 0:
+                        tol = torch.tensor([GATE_DEADZONE_XY_MM, GATE_DEADZONE_XY_MM, GATE_DEADZONE_Z_MM],
+                                           device=x.device) / NORM_POS_ATAR
+                        delta_sq = F.relu((m_i - m_j).abs() - tol) ** 2
+                    var_sum = s_i ** 2 + s_j ** 2 + 1e-6
+
+                    alpha = F.softplus(self.kernel_alpha).view(1, 1, 1, 1, 1, 3)
+                    neg_chi2 = -(delta_sq / var_sum) * alpha
+                    if _GATE_MODE == "best_xy":
+                        # z + majority-weighted BETTER of the two transverse views (ignore the bad one)
+                        g_per_pair = neg_chi2[..., 2] + BEST_XY_BETA * torch.maximum(neg_chi2[..., 0], neg_chi2[..., 1])
+                    else:
+                        g_per_pair = neg_chi2.sum(dim=-1)
+                    kernel_bias = torch.logsumexp(g_per_pair.flatten(-2, -1), dim=-1)
+                    kernel_bias = kernel_bias.clamp(min=-50.0)
 
                 num_heads_sa = self.atar_event_layers[0].self_attn.num_heads
-                kernel_bias_heads = (
-                    kernel_bias.unsqueeze(1)
-                    .expand(-1, num_heads_sa, -1, -1)
-                    .reshape(B_size * num_heads_sa, N_max, N_max)
-                )
+
+                def bias_per_head(bias):
+                    return (bias.unsqueeze(1).expand(-1, num_heads_sa, -1, -1)
+                            .reshape(B_size * num_heads_sa, N_max, N_max))
+                kernel_bias_heads = bias_per_head(kernel_bias)
 
                 jk_stack = [dense_atar9]
                 h_jk = dense_atar9
-                for layer in self.atar_event_layers:
+                for li, layer in enumerate(self.atar_event_layers):
                     h_next = layer(h_jk, src_mask=kernel_bias_heads, src_key_padding_mask=~pad_mask9)
                     if torch.isnan(h_next).any():
                         h_next = h_jk
                     h_jk = h_next
                     jk_stack.append(h_jk)
+                    if _HIT_ENDPOINTS and li == 0:
+                        # Rescore the candidates now that each slice has seen its neighbours,
+                        # then rebuild the gate for the remaining layers.
+                        slice_context = h_jk[pad_mask9][inverse_sort9]
+                        hit_ep_refined = self.hit_endpoint_refine(h_atar, slice_context[hit_slice])
+                        output['hit_endpoints_refined'] = hit_ep_refined
+                        kernel_bias, match_feats = self._hit_endpoint_gate(
+                            hit_ep_refined, hit_pos, hit_group, n_valid_slices,
+                            sort_idx_atar9, sorted_batch9, inverse_sort9)
+                        kernel_bias_heads = bias_per_head(kernel_bias)
 
                 atar_tokens_jk = torch.cat(jk_stack, dim=-1)
 
-                inverse_sort9 = torch.argsort(sort_idx_atar9)
                 jk_flat = atar_tokens_jk[pad_mask9][inverse_sort9]
                 last_flat = jk_stack[-1][pad_mask9][inverse_sort9]
 
@@ -1007,7 +1194,12 @@ class PURITYModel(nn.Module):
                     z_bound = Z_CHAIN_BOUND_MM / NORM_POS_ATAR
                     dz_feats = torch.cat([dz, dz.abs() / z_bound], dim=-1)
                     h_role = F.gelu(self.atar_role_fc1(role_input))
-                    gamma, beta = self.atar_role_film(dz_feats).chunk(2, dim=-1)
+                    if match_feats is not None:
+                        film_hidden = self.atar_role_film[0](dz_feats) + self.atar_role_film_match(match_feats)
+                        film_out = self.atar_role_film[2](self.atar_role_film[1](film_hidden))
+                    else:
+                        film_out = self.atar_role_film(dz_feats)
+                    gamma, beta = film_out.chunk(2, dim=-1)
                     h_role = h_role * (1.0 + gamma) + beta
                     role_logits = self.atar_role_rest(h_role)
                 else:
@@ -1141,7 +1333,7 @@ class PURITYModel(nn.Module):
                 # heavy deposit would otherwise leak ~muon-KE into the positron energy/time for
                 # early-decay michels (a decay-time-correlated fake-pie bias).
                 clean_pos_t = (pion_class_prob_t < 0.05) & (muon_class_prob_t < 0.05)
-                positron_hit_mask = ((hit_trigger_prob_t > 0.5) & (mip_class_prob_t > 0.5)
+                positron_hit_mask = ((hit_trigger_prob_t > _POS_TRIG_THR) & (mip_class_prob_t > _POS_MIP_THR)
                                      & clean_pos_t)
 
                 batch_atar_t = batch[is_atar]
@@ -1189,7 +1381,7 @@ class PURITYModel(nn.Module):
                     torch.full_like(consensus_mc_t, NO_POSITRON_TIME))
                 # (2) how many DISTINCT slices contribute a tagged (trig>0.5 & mip>0.5) hit to the
                 #     plain-mean average -> >=2 means multiple positrons are being blended.
-                hit_tagged = ((hit_trigger_prob_t > 0.5) & (mip_class_prob_t > 0.5)).float()
+                hit_tagged = ((hit_trigger_prob_t > _POS_TRIG_THR) & (mip_class_prob_t > _POS_MIP_THR)).float()
                 sl_tag = torch.zeros(num_global_slices, device=x.device)
                 sl_tag.index_add_(0, global_slice_idx_all, hit_tagged)
                 sl_tag_bg = (sl_tag.view(num_graphs_in_batch, num_slices_max) > 0.5)
@@ -1227,7 +1419,7 @@ class PURITYModel(nn.Module):
                     trigger_prob_full = torch.zeros(num_global_slices, device=x.device)
                     trigger_prob_full[valid_slice_mask] = atar_trigger_probs
                     hit_trigger_prob = trigger_prob_full[global_slice_idx_all]
-                    positron_mask = (hit_trigger_prob > 0.5) & (mip_class_prob > 0.5)
+                    positron_mask = (hit_trigger_prob > _POS_TRIG_THR) & (mip_class_prob > _POS_MIP_THR)
 
                 batch_atar = batch[is_atar]
                 is_x_local = is_atar_x[is_atar]
@@ -1251,6 +1443,23 @@ class PURITYModel(nn.Module):
                 dir_logits = self.positron_dir_head(dir_input)
                 positron_dir = F.normalize(dir_logits, p=2, dim=-1, eps=1e-6)
                 output['atar_positron_dir'] = positron_dir
+
+                if len(self.dir_ensemble):
+                    # the ensemble heads read exactly what the own head read (detached: they are
+                    # trained separately, on the frozen network)
+                    thetas = []
+                    for head in self.dir_ensemble:
+                        pools = []
+                        for mask_view in (mask_x, mask_y):
+                            if mask_view.any():
+                                pools.append(head['dir_attn_pool'](h_atar[mask_view].detach(), batch_atar[mask_view],
+                                                                   dim_size=num_graphs_in_batch))
+                            else:
+                                pools.append(torch.zeros(num_graphs_in_batch, jk_dim, device=x.device))
+                        d = F.normalize(head['positron_dir_head'](torch.cat(pools + [pion_stop_pred.detach()], dim=-1)),
+                                        p=2, dim=-1, eps=1e-6)
+                        thetas.append(torch.acos(d[:, 2].clamp(-1.0, 1.0)))
+                    output['positron_polar_angle_ensemble'] = torch.stack(thetas, dim=1).mean(dim=1)
             else:
                 positron_dir = torch.tensor([[0.0, 0.0, 1.0]], device=x.device).expand(num_graphs_in_batch, -1)
 
@@ -1259,11 +1468,11 @@ class PURITYModel(nn.Module):
                     and 'atar_hit_mip_prob' in output):
                 hit_trig = output['atar_hit_trigger_prob']
                 hit_mip = output['atar_hit_mip_prob']
-                qualifies = ((hit_trig > 0.5) & (hit_mip > 0.5)).float()
+                qualifies = ((hit_trig > _POS_TRIG_THR) & (hit_mip > _POS_MIP_THR)).float()
                 slice_count = torch.zeros(num_global_slices, device=x.device)
                 slice_count.index_add_(0, global_slice_idx_all, qualifies)
                 slice_count = slice_count.view(num_graphs_in_batch, num_slices_max)
-                output['has_trigger_positron_rule'] = (slice_count >= 2.0).any(dim=1).float()
+                output['has_trigger_positron_rule'] = (slice_count >= _HTP_MIN_HITS).any(dim=1).float()
         else:
             pion_stop_pred = torch.zeros(num_graphs_in_batch, 3, device=x.device)
             positron_dir = torch.tensor([[0.0, 0.0, 1.0]], device=x.device).expand(num_graphs_in_batch, -1)
@@ -1772,6 +1981,9 @@ class PURITYModel(nn.Module):
         else:
             cos_theta = positron_dir[:, 2].clamp(-1.0, 1.0)
             polar_angle = torch.acos(cos_theta)
+        ens_angle = output.get('positron_polar_angle_ensemble')   # set only with the network's own direction
+        if ens_angle is not None:
+            polar_angle = ens_angle                        # average of the ensemble heads
 
         pos_time = output.get('positron_time_per_graph')
         if pos_time is None:
@@ -1797,7 +2009,7 @@ class PURITYModel(nn.Module):
         pion_p = output.get('atar_hit_pion_prob')
         muon_p = output.get('atar_hit_muon_prob')
         if trig_p is not None and mip_p is not None and is_atar.any():
-            pos_mask = ((trig_p > 0.5) & (mip_p > 0.5)).float()
+            pos_mask = ((trig_p > _POS_TRIG_THR) & (mip_p > _POS_MIP_THR)).float()
             # suppress merged muon-Bragg / pion-stop pixels (both non-MIP class probs < 0.05)
             # so their heavy deposit does not leak into the positron energy sum -- see the
             # positron_hit_mask above; keeps clean positron hits, drops muon/pion-contaminated ones.
@@ -1850,7 +2062,10 @@ class PURITYModel(nn.Module):
             (ps_raw[:, 2] > ACCEPT_Z_MIN_MM) & (ps_raw[:, 2] < ACCEPT_Z_MAX_MM) &
             (ps_raw[:, 0].abs() < ACCEPT_XY_MAX_MM) & (ps_raw[:, 1].abs() < ACCEPT_XY_MAX_MM)
         )
-        angle_ok = positron_dir[:, 2] > _ACCEPT_ANGLE_COS
+        if ens_angle is not None:                          # theta < 120 deg on the ensemble average
+            angle_ok = ens_angle < math.radians(ACCEPT_ANGLE_MAX_DEG)
+        else:
+            angle_ok = positron_dir[:, 2] > _ACCEPT_ANGLE_COS
         htp_rule = output.get('has_trigger_positron_rule')
         if htp_rule is not None:
             accepted = (fiducial & angle_ok & (htp_rule > 0.5)).float()

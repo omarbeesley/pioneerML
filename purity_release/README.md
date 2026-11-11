@@ -12,7 +12,8 @@ New results should identify their source revision, checkpoint, inputs and settin
 
 | Model | Definition | Selected checkpoint |
 | --- | --- | --- |
-| PURITY reconstruction | [models/main.py](src/purity/models/main.py): `PURITYModel` | `main_hybridv2_filmg2_epoch19.pth` |
+| PURITY reconstruction, current | [models/main.py](src/purity/models/main.py): `PURITYModel` with 25 direction heads | `main_xtal_pw20_epoch20_heads25.pth` |
+| PURITY reconstruction, thesis | [models/main.py](src/purity/models/main.py): `PURITYModel` | `main_hybridv2_filmg2_epoch19.pth` |
 | PURITY tail reveal | [models/tail.py](src/purity/models/tail.py): `PURITYTailModel` | `PURITY_TAIL10_epoch10.pth` |
 
 [models/layers.py](src/purity/models/layers.py) contains shared graph and attention
@@ -42,6 +43,21 @@ newly converted samples is out of their training distribution; retrain on reconv
 samples for new results. `purity.preprocessing.atar_strip_positions` converts older
 parquets without ROOT ([data contract](docs/data_contract.md)).
 
+**Current model (2026-11-11).** `main_xtal_pw20_epoch20_heads25.pth` is the first
+reconstruction checkpoint trained on measured positions: ATAR strip and plane centres and
+LYSO crystal positions, with no Geant4 deposit centroids in its inputs. It adds
+hit-anchored endpoints, a higher positron weight in the role loss (pw20) and 25 direction
+heads whose polar angles are averaged. Its profile,
+`configs/main_xtal_pw20_ep20_heads25.json`, runs the lenient identification it was
+selected at (trigger threshold 0.001). On 10.1M pie and 101.5M Michel events its
+counting acceptance bias is +0.080 ± 0.006 %. The terms are identification
+(missed or wrongly chosen positron) +0.036, angle +0.025 and pion-stop fiducial +0.018,
+and the counting simplifications add about +0.002. Recipe in
+[training](docs/training.md#current-reconstruction-model-pw20-with-25-direction-heads),
+numbers in [main_xtal_pw20_artifacts.json](provenance/main_xtal_pw20_artifacts.json).
+Inputs must be converted the same way (`purity.preprocessing.atar_strip_positions`,
+then `purity.preprocessing.lyso_crystal_positions`).
+
 ## Run
 
 The validated environment is the production `pytorch.sif` container; versions are
@@ -58,7 +74,9 @@ apptainer exec --cleanenv --contain --pwd /tmp \
   --output /release/outputs/main
 ```
 
-For tail inference, use `configs/tail10_ep10.json` and `outputs/tail`. Add `--nv`
+For the current model, use `configs/main_xtal_pw20_ep20_heads25.json` on converted inputs;
+the bundled examples carry the older truth-centroid positions. For tail inference, use
+`configs/tail10_ep10.json` and `outputs/tail`. Add `--nv`
 for GPU use. The runner checks checkpoint hashes, sets the profile and seed, and
 records inputs, settings, source hashes and completion in `run.json`. Main inference
 writes event, slice and calorimeter tables; tail inference writes
